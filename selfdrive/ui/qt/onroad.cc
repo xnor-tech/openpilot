@@ -96,7 +96,7 @@ void OnroadWindow::mousePressEvent(QMouseEvent* e) {
   if (map != nullptr) {
     // Switch between map and sidebar when using navigate on openpilot
     bool sidebarVisible = geometry().x() > 0;
-    bool show_map = uiState()->scene.navigate_on_openpilot ? sidebarVisible : !sidebarVisible;
+    bool show_map = !sidebarVisible;
     map->setVisible(show_map && !map->isVisible());
   }
 #endif

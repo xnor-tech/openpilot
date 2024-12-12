@@ -57,7 +57,7 @@ class MapBoxInternetDisabledRequestHandler(http.server.BaseHTTPRequestHandler):
   def log_error(self, *args: Any) -> None:
     return
 
-
+@pytest.mark.skip(reason="not used")
 class MapBoxInternetDisabledServer(threading.Thread):
   def run(self):
     self.server = http.server.HTTPServer(("127.0.0.1", 5000), MapBoxInternetDisabledRequestHandler)
