@@ -82,8 +82,8 @@ class Controls:
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                    'driverMonitoringState', 'longitudinalPlan', 'lateralPlan', 'liveLocationKalman',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
-                                   'testJoystick', 'navModel'] + self.camera_packets + self.sensor_packets,
-                                  ignore_alive=ignore, ignore_avg_freq=['radarState', 'testJoystick'], ignore_valid=['testJoystick','navModel'])
+                                   'testJoystick'] + self.camera_packets + self.sensor_packets,
+                                  ignore_alive=ignore, ignore_avg_freq=['radarState', 'testJoystick'], ignore_valid=['testJoystick'])
 
     if CI is None:
       # wait for one pandaState and one CAN packet
@@ -886,7 +886,6 @@ class Controls:
     # EXCEPTION: if NavOnOp is enabled we need to stay in Experimental Mode
 
     if self.experimentalModeSpeedAutoswitch:
-      nav_valid = self.sm.valid["navModel"]
       if self.sm['longitudinalPlan'] and len(self.sm['longitudinalPlan'].accels) and len(self.sm['longitudinalPlan'].speeds):
         if (
           self.sm['longitudinalPlan'].hasLead == self.experimentalModeHasLead_last and # has lead
@@ -908,7 +907,7 @@ class Controls:
       self.experimentalModeSpeed_last = (CS.vEgo < self.experimentalModeMaxSpeedMS)
       if self.experimentalModeSpeed_count > E2E_COUNT:
         self.experimentalModeSpeed = (CS.vEgo < self.experimentalModeMaxSpeedMS)
-      expm = nav_valid or (self.experimentalModeSpeed and not self.experimentalModeHasLead)
+      expm = (self.experimentalModeSpeed and not self.experimentalModeHasLead)
       #if nav_valid then always use experimental mode
       if self.experimental_mode != expm:
         self.params.put_bool("ExperimentalMode",expm)
