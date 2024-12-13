@@ -279,11 +279,6 @@ void UIState::setPrimeType(PrimeType type) {
     prime_type = type;
     Params().put("PrimeType", std::to_string(prime_type));
     emit primeTypeChanged(prime_type);
-
-    bool prime = hasPrime();
-    if (prev_prime != prime) {
-      emit primeChanged(prime);
-    }
   }
 }
 

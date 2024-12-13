@@ -190,7 +190,6 @@ public:
 signals:
   void uiUpdate(const UIState &s);
   void offroadTransition(bool offroad);
-  void primeChanged(bool prime);
   void primeTypeChanged(PrimeType prime_type);
 
 private slots:
