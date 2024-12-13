@@ -389,10 +389,6 @@ selfdrive/modeld/runners/*.py
 selfdrive/monitoring/dmonitoringd.py
 selfdrive/monitoring/driver_monitor.py
 
-selfdrive/navd/.gitignore
-selfdrive/navd/__init__.py
-selfdrive/navd/**
-
 selfdrive/assets/.gitignore
 selfdrive/assets/assets.qrc
 selfdrive/assets/*.png

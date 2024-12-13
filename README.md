@@ -126,7 +126,6 @@ Directory Structure
         ├── manager         # Daemon that starts/stops all other daemons as needed
         ├── modeld          # Driving and monitoring model runners
         ├── monitoring      # Daemon to determine driver attention
-        ├── navd            # Turn-by-turn navigation
         ├── test            # Unit tests, system tests, and a car simulator
         └── ui              # The UI
 

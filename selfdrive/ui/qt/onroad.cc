@@ -11,10 +11,6 @@
 
 #include "common/timing.h"
 #include "selfdrive/ui/qt/util.h"
-#ifdef ENABLE_MAPS
-#include "selfdrive/ui/qt/maps/map_helpers.h"
-#include "selfdrive/ui/qt/maps/map_panel.h"
-#endif
 
 static void drawIcon(QPainter &p, const QPoint &center, const QPixmap &img, const QBrush &bg, float opacity) {
   p.setRenderHint(QPainter::Antialiasing);
@@ -47,11 +43,6 @@ OnroadWindow::OnroadWindow(QWidget *parent) : QWidget(parent) {
     split->insertWidget(0, arCam);
   }
 
-  if (getenv("MAP_RENDER_VIEW")) {
-    CameraWidget *map_render = new CameraWidget("navd", VISION_STREAM_MAP, false, this);
-    split->insertWidget(0, map_render);
-  }
-
   stacked_layout->addWidget(split_wrapper);
 
   alerts = new OnroadAlerts(this);
@@ -64,7 +55,6 @@ OnroadWindow::OnroadWindow(QWidget *parent) : QWidget(parent) {
   setAttribute(Qt::WA_OpaquePaintEvent);
   QObject::connect(uiState(), &UIState::uiUpdate, this, &OnroadWindow::updateState);
   QObject::connect(uiState(), &UIState::offroadTransition, this, &OnroadWindow::offroadTransition);
-  QObject::connect(uiState(), &UIState::primeChanged, this, &OnroadWindow::primeChanged);
 }
 
 void OnroadWindow::updateState(const UIState &s) {
@@ -92,50 +82,12 @@ void OnroadWindow::updateState(const UIState &s) {
 }
 
 void OnroadWindow::mousePressEvent(QMouseEvent* e) {
-#ifdef ENABLE_MAPS
-  if (map != nullptr) {
-    // Switch between map and sidebar when using navigate on openpilot
-    bool sidebarVisible = geometry().x() > 0;
-    bool show_map = !sidebarVisible;
-    map->setVisible(show_map && !map->isVisible());
-  }
-#endif
   // propagation event to parent(HomeWindow)
   QWidget::mousePressEvent(e);
 }
 
 void OnroadWindow::offroadTransition(bool offroad) {
-#ifdef ENABLE_MAPS
-  if (!offroad) {
-    if (map == nullptr && (uiState()->hasPrime() || !MAPBOX_TOKEN.isEmpty())) {
-      auto m = new MapPanel(get_mapbox_settings());
-      map = m;
-
-      QObject::connect(m, &MapPanel::mapPanelRequested, this, &OnroadWindow::mapPanelRequested);
-      QObject::connect(nvg->map_settings_btn, &MapSettingsButton::clicked, m, &MapPanel::toggleMapSettings);
-      nvg->map_settings_btn->setEnabled(true);
-
-      m->setFixedWidth(topWidget(this)->width() / 2 - UI_BORDER_SIZE);
-      split->insertWidget(0, m);
-
-      // hidden by default, made visible when navRoute is published
-      m->setVisible(false);
-    }
-  }
-#endif
-
   alerts->updateAlert({});
-}
-
-void OnroadWindow::primeChanged(bool prime) {
-#ifdef ENABLE_MAPS
-  if (map && (!prime && MAPBOX_TOKEN.isEmpty())) {
-    nvg->map_settings_btn->setEnabled(false);
-    nvg->map_settings_btn->setVisible(false);
-    map->deleteLater();
-    map = nullptr;
-  }
-#endif
 }
 
 void OnroadWindow::paintEvent(QPaintEvent *event) {
@@ -243,23 +195,6 @@ void ExperimentalButton::paintEvent(QPaintEvent *event) {
   drawIcon(p, QPoint(btn_size / 2, btn_size / 2), img, QColor(0, 0, 0, 166), (isDown() || !engageable) ? 0.6 : 1.0);
 }
 
-
-// MapSettingsButton
-MapSettingsButton::MapSettingsButton(QWidget *parent) : QPushButton(parent) {
-  setFixedSize(btn_size, btn_size);
-  settings_img = loadPixmap("../assets/navigation/icon_directions_outlined.svg", {img_size, img_size});
-
-  // hidden by default, made visible if map is created (has prime or mapbox token)
-  setVisible(false);
-  setEnabled(false);
-}
-
-void MapSettingsButton::paintEvent(QPaintEvent *event) {
-  QPainter p(this);
-  drawIcon(p, QPoint(btn_size / 2, btn_size / 2), settings_img, QColor(0, 0, 0, 166), isDown() ? 0.6 : 1.0);
-}
-
-
 // Window that shows camera view and variety of info drawn on top
 AnnotatedCameraWidget::AnnotatedCameraWidget(VisionStreamType type, QWidget* parent) : fps_filter(UI_FREQ, 3, 1. / UI_FREQ), CameraWidget("camerad", type, true, parent) {
   pm = std::make_unique<PubMaster, const std::initializer_list<const char *>>({"uiDebug"});
@@ -270,9 +205,6 @@ AnnotatedCameraWidget::AnnotatedCameraWidget(VisionStreamType type, QWidget* par
 
   experimental_btn = new ExperimentalButton(this);
   main_layout->addWidget(experimental_btn, 0, Qt::AlignTop | Qt::AlignRight);
-
-  map_settings_btn = new MapSettingsButton(this);
-  main_layout->addWidget(map_settings_btn, 0, Qt::AlignBottom | Qt::AlignRight);
 
   dm_img = loadPixmap("../assets/img_driver_face.png", {img_size + 5, img_size + 5});
 }
@@ -321,12 +253,6 @@ void AnnotatedCameraWidget::updateState(const UIState &s) {
   rightHandDM = dm_state.getIsRHD();
   // DM icon transition
   dm_fade_state = std::clamp(dm_fade_state+0.2*(0.5-dmActive), 0.0, 1.0);
-
-  // hide map settings button for alerts and flip for right hand DM
-  if (map_settings_btn->isEnabled()) {
-    map_settings_btn->setVisible(!hideBottomIcons);
-    main_layout->setAlignment(map_settings_btn, (rightHandDM ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignBottom);
-  }
 }
 
 void AnnotatedCameraWidget::drawHud(QPainter &p) {

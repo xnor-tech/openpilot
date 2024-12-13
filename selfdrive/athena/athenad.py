@@ -325,20 +325,6 @@ def getVersion() -> Dict[str, str]:
     "commit": get_commit(default=''),
   }
 
-
-@dispatcher.add_method
-def setNavDestination(latitude: int = 0, longitude: int = 0, place_name: Optional[str] = None, place_details: Optional[str] = None) -> Dict[str, int]:
-  destination = {
-    "latitude": latitude,
-    "longitude": longitude,
-    "place_name": place_name,
-    "place_details": place_details,
-  }
-  Params().put("NavDestination", json.dumps(destination))
-
-  return {"success": 1}
-
-
 def scan_dir(path: str, prefix: str) -> List[str]:
   files = []
   # only walk directories that match the prefix

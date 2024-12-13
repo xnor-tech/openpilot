@@ -49,19 +49,6 @@ private:
   bool engageable;
 };
 
-
-class MapSettingsButton : public QPushButton {
-  Q_OBJECT
-
-public:
-  explicit MapSettingsButton(QWidget *parent = 0);
-
-private:
-  void paintEvent(QPaintEvent *event) override;
-
-  QPixmap settings_img;
-};
-
 // container window for the NVG UI
 class AnnotatedCameraWidget : public CameraWidget {
   Q_OBJECT
@@ -69,8 +56,6 @@ class AnnotatedCameraWidget : public CameraWidget {
 public:
   explicit AnnotatedCameraWidget(VisionStreamType type, QWidget* parent = 0);
   void updateState(const UIState &s);
-
-  MapSettingsButton *map_settings_btn;
 
 private:
   void drawText(QPainter &p, int x, int y, const QString &text, int alpha = 255);
