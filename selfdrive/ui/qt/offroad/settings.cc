@@ -78,6 +78,13 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
                                           "../assets/offroad/icon_speed_limit.png",
                                           longi_button_texts);
 
+  std::vector<QString> traffic_sign_button_texts{tr("Off"), tr("+5%"), tr("+10%"), tr("+15%")};
+  traffic_sign_setting = new ButtonParamControl("TrafficSignOffset", tr("Traffic Sign Detection"),
+                                    tr("Adjust the traffic sign detection sensitivity. Off will disable the feature, "
+                                       "while the percentage values increase detection sensitivity."),
+                                    "../assets/offroad/icon_road.png",
+                                    traffic_sign_button_texts);
+
   // set up uiState update for personality setting
   QObject::connect(uiState(), &UIState::uiUpdate, this, &TogglesPanel::updateState);
 
@@ -93,6 +100,7 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
     // insert longitudinal personality after NDOG toggle
     if (param == "DisengageOnAccelerator") {
       addItem(long_personality_setting);
+      addItem(traffic_sign_setting);
     }
   }
 
@@ -341,7 +349,7 @@ void SettingsWindow::setCurrentPanel(int index, const QString &param) {
     if (param.endsWith("Panel")) {
       QString panelName = param;
       panelName.chop(5); // Remove "Panel" suffix
-      
+
       // Find the panel by name
       for (int i = 0; i < nav_btns->buttons().size(); i++) {
         bool panel_trimmed = false;
@@ -357,7 +365,7 @@ void SettingsWindow::setCurrentPanel(int index, const QString &param) {
       emit expandToggleDescription(param);
     }
   }
-  
+
   panel_widget->setCurrentIndex(index);
   nav_btns->buttons()[index]->setChecked(true);
 }
