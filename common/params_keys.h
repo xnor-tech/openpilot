@@ -78,6 +78,7 @@ inline static std::unordered_map<std::string, uint32_t> keys = {
     {"LocationFilterInitialState", PERSISTENT},
     {"LongitudinalManeuverMode", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
     {"LongitudinalPersonality", PERSISTENT | BACKUP},
+    {"TrafficSignOffset", PERSISTENT | BACKUP},
     {"NetworkMetered", PERSISTENT},
     {"ObdMultiplexingChanged", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
     {"ObdMultiplexingEnabled", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
@@ -101,6 +102,7 @@ inline static std::unordered_map<std::string, uint32_t> keys = {
     {"RecordFront", PERSISTENT | BACKUP},
     {"RecordFrontLock", PERSISTENT},  // for the internal fleet
     {"SecOCKey", PERSISTENT | DONT_LOG},  // Candidate for | BACKUP
+    {"setSpeed", PERSISTENT | DONT_LOG},
     {"RouteCount", PERSISTENT},
     {"SnoozeUpdate", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
     {"SshEnabled", PERSISTENT | BACKUP},
