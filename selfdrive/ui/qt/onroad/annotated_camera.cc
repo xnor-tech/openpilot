@@ -19,6 +19,14 @@ AnnotatedCameraWidget::AnnotatedCameraWidget(VisionStreamType type, QWidget *par
 
   experimental_btn = new ExperimentalButton(this);
   main_layout->addWidget(experimental_btn, 0, Qt::AlignTop | Qt::AlignRight);
+
+  QHBoxLayout *speed_control_layout = new QHBoxLayout();
+  speed_control_layout->setContentsMargins(0, 0, 0, 250);
+  speed_control_layout->setAlignment(Qt::AlignBottom | Qt::AlignRight);
+
+  speed_control_btn = new SpeedControl(this);
+  speed_control_layout->addWidget(speed_control_btn);
+  main_layout->addLayout(speed_control_layout);
 }
 
 void AnnotatedCameraWidget::updateState(const UIState &s) {

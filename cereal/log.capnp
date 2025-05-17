@@ -138,6 +138,13 @@ enum LongitudinalPersonality {
   relaxed @2;
 }
 
+enum TrafficSignOffset {
+  off @0;
+  five @1;
+  ten @2;
+  fifteen @3;
+}
+
 struct InitData {
   kernelArgs @0 :List(Text);
   kernelVersion @15 :Text;
@@ -827,6 +834,7 @@ struct SelfdriveState {
   # configurable driving settings
   experimentalMode @10 :Bool;
   personality @11 :LongitudinalPersonality;
+  trafficSignOffset @13 :TrafficSignOffset;
 
   enum OpenpilotState @0xdbe58b96d2d1ac61 {
     disabled @0;
@@ -2345,6 +2353,10 @@ struct UIDebug {
   drawTimeMillis @0 :Float32;
 }
 
+struct UiSetSpeed {
+  buttonSignal @0 :Int16;
+}
+
 struct ManagerState {
   processes @0 :List(ProcessState);
 
@@ -2576,6 +2588,8 @@ struct Event {
     # UI services
     userFlag @93 :UserFlag;
     uiDebug @102 :UIDebug;
+    uiSetSpeed @147 :UiSetSpeed;
+
 
     # *********** debug ***********
     testJoystick @52 :Joystick;

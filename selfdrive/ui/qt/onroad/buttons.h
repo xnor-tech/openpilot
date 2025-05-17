@@ -1,6 +1,9 @@
 #pragma once
 
 #include <QPushButton>
+#include <QWidget>
+#include <QLabel>
+#include <memory>
 
 #ifdef SUNNYPILOT
 #include "selfdrive/ui/sunnypilot/ui.h"
@@ -32,5 +35,19 @@ protected:
   bool experimental_mode;
   bool engageable;
 };
+
+  class SpeedControl : public QWidget {
+    Q_OBJECT
+
+  public:
+    explicit SpeedControl(QWidget *parent = nullptr);
+
+  private:
+    std::unique_ptr<PubMaster> pm;
+    uint32_t speed;
+    QString setSpeedValue;
+    QPushButton *decreaseButton;
+    QPushButton *increaseButton;
+ };
 
 void drawIcon(QPainter &p, const QPoint &center, const QPixmap &img, const QBrush &bg, float opacity);
