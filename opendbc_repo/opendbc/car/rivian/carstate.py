@@ -125,8 +125,8 @@ class CarState(CarStateBase):
     prev_distance_button = self.distance_button
     if right_scroll != 255:
       self.distance_button = right_scroll
-      pressed = prev_distance_button != self.distance_button
-      # ret.buttonEvents = [structs.CarState.ButtonEvent(pressed=pressed, type=ButtonType.gapAdjustCruise)]
+      if prev_distance_button != self.distance_button:
+        ret.buttonEvents = [structs.CarState.ButtonEvent(pressed=False, type=ButtonType.gapAdjustCruise)]
 
     # Messages needed by carcontroller
     self.acm_lka_hba_cmd = copy.copy(cp_cam.vl["ACM_lkaHbaCmd"])
