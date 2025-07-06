@@ -68,7 +68,7 @@ class Ratekeeper:
   @property
   def lagging(self) -> bool:
     avg_dt = sum(self._dts) / len(self._dts)
-    expected_dt = self._interval * (1 / 0.9)
+    expected_dt = self._interval * (1 / 0.8)
     return avg_dt > expected_dt
 
   # Maintain loop rate by calling this at the end of each loop
