@@ -428,9 +428,18 @@ def hardware_thread(end_event, hw_queue) -> None:
     # report to server once every 10 minutes
     rising_edge_started = should_start and not should_start_prev
     if rising_edge_started or (count % int(600. / DT_HW)) == 0:
+
+      panda_states = []
+      for p in pandaStates:
+        try:
+          panda_states.append(strip_deprecated_keys(p.to_dict()))
+        except RuntimeError as e:
+          print(f"RuntimeError: {e}")
+          print(p)
+
       dat = {
         'count': count,
-        'pandaStates': [strip_deprecated_keys(p.to_dict()) for p in pandaStates],
+        'pandaStates': panda_states,
         'peripheralState': strip_deprecated_keys(peripheralState.to_dict()),
         'location': (strip_deprecated_keys(sm["gpsLocationExternal"].to_dict()) if sm.alive["gpsLocationExternal"] else None),
         'deviceState': strip_deprecated_keys(msg.to_dict())
