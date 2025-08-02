@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-uv pip install "numpy<2"
+pip install timezonefinder
 
 export PASSIVE="0"
 exec ./launch_chffrplus.sh
