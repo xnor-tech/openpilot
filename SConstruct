@@ -167,9 +167,11 @@ else:
 if arch != "Darwin":
   ldflags += ["-Wl,--as-needed", "-Wl,--no-undefined"]
 
+numpy_flag = ["-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"]
+
 # Enable swaglog include in submodules
-cflags += ['-DSWAGLOG="\\"common/swaglog.h\\""']
-cxxflags += ['-DSWAGLOG="\\"common/swaglog.h\\""']
+cflags += ['-DSWAGLOG="\\"common/swaglog.h\\""'] + numpy_flag
+cxxflags += ['-DSWAGLOG="\\"common/swaglog.h\\""'] + numpy_flag
 
 ccflags_option = GetOption('ccflags')
 if ccflags_option:
@@ -191,6 +193,7 @@ env = Environment(
     "-Wno-c99-designator",
     "-Wno-reorder-init-list",
     "-Wno-error=unused-but-set-variable",
+    "-Wno-vla-cxx-extension",
   ] + cflags + ccflags,
 
   CPPPATH=cpppath + [
@@ -230,7 +233,7 @@ env = Environment(
   COMPILATIONDB_USE_ABSPATH=True,
   REDNOSE_ROOT="#",
   tools=["default", "cython", "compilation_db", "rednose_filter"],
-  toolpath=["#rednose_repo/site_scons/site_tools"],
+  toolpath=["#site_scons/site_tools", "#rednose_repo/site_scons/site_tools"],
 )
 
 if arch == "Darwin":
@@ -269,7 +272,8 @@ if arch == "Darwin":
 else:
   envCython["LINKFLAGS"] = ["-pthread", "-shared"]
 
-Export('envCython')
+np_version = SCons.Script.Value(np.__version__)
+Export('envCython', 'np_version')
 
 # Qt build environment
 qt_env = env.Clone()

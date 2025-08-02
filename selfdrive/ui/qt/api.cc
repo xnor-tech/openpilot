@@ -2,6 +2,7 @@
 
 #include <openssl/bio.h>
 #include <openssl/pem.h>
+#include <openssl/evp.h>
 #include <openssl/rsa.h>
 
 #include <QApplication>
@@ -30,16 +31,36 @@ QByteArray rsa_sign(const QByteArray &data) {
 
   BIO* mem = BIO_new_mem_buf(key.data(), key.size());
   assert(mem);
-  RSA* rsa_private = PEM_read_bio_RSAPrivateKey(mem, NULL, NULL, NULL);
-  assert(rsa_private);
-  auto sig = QByteArray();
-  sig.resize(RSA_size(rsa_private));
-  unsigned int sig_len;
-  int ret = RSA_sign(NID_sha256, (unsigned char*)data.data(), data.size(), (unsigned char*)sig.data(), &sig_len, rsa_private);
+  
+  EVP_PKEY* pkey = PEM_read_bio_PrivateKey(mem, NULL, NULL, NULL);
+  assert(pkey);
+  
+  EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+  assert(md_ctx);
+  
+  // Initialize the signing operation
+  int ret = EVP_DigestSignInit(md_ctx, NULL, EVP_sha256(), NULL, pkey);
   assert(ret == 1);
-  assert(sig_len == sig.size());
+  
+  // Get the required signature length
+  size_t sig_len;
+  ret = EVP_DigestSign(md_ctx, NULL, &sig_len, (const unsigned char*)data.data(), data.size());
+  assert(ret == 1);
+  
+  // Perform the signature
+  QByteArray sig(sig_len, 0);
+  ret = EVP_DigestSign(md_ctx, (unsigned char*)sig.data(), &sig_len, 
+                      (const unsigned char*)data.data(), data.size());
+  assert(ret == 1);
+  
+  // Resize to actual signature length
+  sig.resize(sig_len);
+  
+  // Clean up
+  EVP_MD_CTX_free(md_ctx);
+  EVP_PKEY_free(pkey);
   BIO_free(mem);
-  RSA_free(rsa_private);
+  
   return sig;
 }
 
