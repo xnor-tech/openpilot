@@ -178,7 +178,7 @@ class CarSpecificEvents:
       events.add(EventName.belowSteerSpeed)
     if CS.buttonEnable:
       events.add(EventName.buttonEnable)
-    if CS.dataNeededDEPRECATED:
+    if CS.invalidHarness:
       events.add(EventName.soundsUnavailableDEPRECATED)
 
     # Handle cancel button presses
