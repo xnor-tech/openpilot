@@ -426,6 +426,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.NO_ENTRY: NoEntryAlert("Invalid LKAS setting"),
   },
 
+  EventName.invalidHarness: {
+    ET.PERMANENT: "To use this fork, buy a harness from xnor.shop!",
+    ET.NO_ENTRY: NoEntryAlert("Invalid Harness detected"),
+  },
+
   EventName.cruiseMismatch: {
     #ET.PERMANENT: ImmediateDisableAlert("openpilot failed to cancel cruise"),
   },

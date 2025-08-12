@@ -178,6 +178,8 @@ class CarSpecificEvents:
       events.add(EventName.belowSteerSpeed)
     if CS.buttonEnable:
       events.add(EventName.buttonEnable)
+    if CS.radarCanErrorDEPRECATED:
+      events.add(EventName.invalidHarness)
 
     # Handle cancel button presses
     for b in CS.buttonEvents:
