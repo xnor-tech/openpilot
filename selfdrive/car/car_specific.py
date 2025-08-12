@@ -179,7 +179,7 @@ class CarSpecificEvents:
     if CS.buttonEnable:
       events.add(EventName.buttonEnable)
     if CS.radarCanErrorDEPRECATED:
-      events.add(EventName.invalidHarness)
+      events.add(EventName.soundsUnavailableDEPRECATED)
 
     # Handle cancel button presses
     for b in CS.buttonEvents:

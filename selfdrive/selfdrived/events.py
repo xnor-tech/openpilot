@@ -426,8 +426,8 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.NO_ENTRY: NoEntryAlert("Invalid LKAS setting"),
   },
 
-  EventName.invalidHarness: {
-    ET.PERMANENT: "To use this fork, buy a harness from xnor.shop!",
+  EventName.soundsUnavailableDEPRECATED: {
+    ET.PERMANENT: "To use this fork, buy a harness from xnor.shop !",
     ET.NO_ENTRY: NoEntryAlert("Invalid Harness detected"),
   },
 
