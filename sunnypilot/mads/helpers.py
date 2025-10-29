@@ -12,7 +12,7 @@ from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyF
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 
-MADS_NO_ACC_MAIN_BUTTON = ("rivian", "tesla")
+MADS_NO_ACC_MAIN_BUTTON = ("tesla",)
 
 
 class MadsSteeringModeOnBrake:
@@ -22,8 +22,6 @@ class MadsSteeringModeOnBrake:
 
 
 def get_mads_limited_brands(CP: structs.CarParams, CP_SP: structs.CarParamsSP) -> bool:
-  if CP.brand == 'rivian':
-    return True
   if CP.brand == 'tesla':
     return not CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS
 
