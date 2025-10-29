@@ -13,9 +13,6 @@
 #include "selfdrive/ui/sunnypilot/qt/widgets/controls.h"
 
 inline bool madsLimitedSettings(const cereal::CarParams::Reader &CP, const cereal::CarParamsSP::Reader &CP_SP) {
-  if (CP.getBrand() == "rivian") {
-    return true;
-  }
   if (CP.getBrand() == "tesla") {
     return !(CP_SP.getFlags() & 1);  // 1 == TeslaFlagsSP.HAS_VEHICLE_BUS
   }
