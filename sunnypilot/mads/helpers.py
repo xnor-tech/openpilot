@@ -12,7 +12,7 @@ from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyF
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 
-MADS_NO_ACC_MAIN_BUTTON = ("tesla",)
+MADS_NO_ACC_MAIN_BUTTON = ("tesla", "rivian")
 
 
 class MadsSteeringModeOnBrake:
