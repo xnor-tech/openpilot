@@ -243,6 +243,8 @@ class Updater:
     if b is None:
       b = self.get_branch(BASEDIR)
     b = {
+      ("tici", "xnor-dev"): "xnor-c3",
+      ("tici", "xnor"): "xnor-c3",
       ("tici", "release3"): "release-tici"
     }.get((HARDWARE.get_device_type(), b), b)
     return b
