@@ -3,7 +3,8 @@
   url = https://github.com/sunnyhaibin/panda.git
 [submodule "opendbc"]
   path = opendbc_repo
-  url = https://github.com/xnor-tech/opendbc.git
+	url = https://github.com/Uncle-Tony/xnor-fork.git
+	branch = rivian-mads
 [submodule "msgq"]
   path = msgq_repo
   url = https://github.com/sunnypilot/msgq.git
