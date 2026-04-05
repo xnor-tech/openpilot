@@ -23,6 +23,9 @@ AddOption('--minimal',
           dest='extras',
           default=os.path.exists(File('#.gitattributes').abspath), # minimal by default on release branch (where there's no LFS)
           help='the minimum build to run openpilot. no tests, tools, etc.')
+AddOption('--ubsan',
+          action='store_true',
+          help='turn on UBSan')
 
 # Detect platform
 arch = subprocess.check_output(["uname", "-m"], encoding='utf8').rstrip()
