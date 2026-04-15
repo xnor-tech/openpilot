@@ -16,9 +16,21 @@
 
 #include "board/drivers/can_common.h"
 
+#ifdef STM32H7
 #include "board/drivers/fdcan.h"
+#else
+#include "board/drivers/bxcan.h"
+#endif
 
-#include "board/sys/power_saving.h"
+#include "board/power_saving.h"
+
+#ifdef STM32H7
+#define XNOR_POWER_SAVE_ENABLED() (power_save_enabled)
+#define XNOR_SET_POWER_SAVE_STATE(enabled) set_power_save_state((enabled))
+#else
+#define XNOR_POWER_SAVE_ENABLED() (power_save_status == POWER_SAVE_STATUS_ENABLED)
+#define XNOR_SET_POWER_SAVE_STATE(enabled) set_power_save_state((enabled) ? POWER_SAVE_STATUS_ENABLED : POWER_SAVE_STATUS_DISABLED)
+#endif
 
 #include "board/obj/gitversion.h"
 
@@ -211,7 +223,7 @@ static void tick_handler(void) {
       // re-init everything that uses harness status
       can_init_all();
       set_safety_mode(current_safety_mode, current_safety_param);
-      set_power_save_state(power_save_enabled);
+      XNOR_SET_POWER_SAVE_STATE(XNOR_POWER_SAVE_ENABLED());
     }
 
     // decimated to 1Hz
@@ -230,7 +242,7 @@ static void tick_handler(void) {
 
       // turn off the blue LED, turned on by CAN
       // unless we are in power saving mode
-      led_set(LED_BLUE, (uptime_cnt & 1U) && power_save_enabled);
+      led_set(LED_BLUE, (uptime_cnt & 1U) && XNOR_POWER_SAVE_ENABLED());
 
       const bool recent_heartbeat = heartbeat_counter == 0U;
 
@@ -294,8 +306,8 @@ static void tick_handler(void) {
             set_safety_mode(SAFETY_SILENT, 0U);
           }
 
-          if (!power_save_enabled) {
-            set_power_save_state(true);
+          if (!XNOR_POWER_SAVE_ENABLED()) {
+            XNOR_SET_POWER_SAVE_STATE(true);
           }
 
           // Also disable IR when the heartbeat goes missing
@@ -409,7 +421,7 @@ int main(void) {
       enter_stop_mode();
     }
     #endif
-    if (!power_save_enabled) {
+    if (!XNOR_POWER_SAVE_ENABLED()) {
       #ifdef DEBUG_FAULTS
       if (fault_status == FAULT_STATUS_NONE) {
       #endif
