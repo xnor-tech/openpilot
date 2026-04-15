@@ -99,7 +99,7 @@ _services: dict[str, tuple] = {
   "livestreamWideRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamDriverEncodeData": (False, 20., None, QueueSize.MEDIUM),
-  "mapdOut": (True, 20., 20),
+  "mapdOut": (True, 20., 20, QueueSize.MEDIUM),
   "mapdExtendedOut": (False, 1.),
   "mapdIn": (False, 0.),
   "mapdCli": (False, 0.),

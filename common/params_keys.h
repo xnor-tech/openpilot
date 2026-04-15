@@ -152,4 +152,5 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TinklaUseTeslaRadarUpsideDown", {PERSISTENT, BOOL, "0"}},
     {"PedalEnabled", {PERSISTENT, BOOL, "0"}},
     {"Version", {PERSISTENT, STRING}},
+    {"MapdSettings", {PERSISTENT, JSON}},
 };
