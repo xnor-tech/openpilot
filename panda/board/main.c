@@ -37,6 +37,54 @@ void debug_ring_callback(uart_ring *ring) {
 
 // ****************************** safety mode ******************************
 
+static void disable_unused_can_irqs(uint8_t enabled_mask) {
+  for (uint8_t i = 0U; i < PANDA_CAN_CNT; i++) {
+    if ((enabled_mask & (uint8_t)(1U << i)) == 0U) {
+#ifdef STM32H7
+      if (i == 0U) {
+        NVIC_DisableIRQ(FDCAN1_IT0_IRQn);
+        NVIC_DisableIRQ(FDCAN1_IT1_IRQn);
+        NVIC_ClearPendingIRQ(FDCAN1_IT0_IRQn);
+        NVIC_ClearPendingIRQ(FDCAN1_IT1_IRQn);
+      } else if (i == 1U) {
+        NVIC_DisableIRQ(FDCAN2_IT0_IRQn);
+        NVIC_DisableIRQ(FDCAN2_IT1_IRQn);
+        NVIC_ClearPendingIRQ(FDCAN2_IT0_IRQn);
+        NVIC_ClearPendingIRQ(FDCAN2_IT1_IRQn);
+      } else {
+        NVIC_DisableIRQ(FDCAN3_IT0_IRQn);
+        NVIC_DisableIRQ(FDCAN3_IT1_IRQn);
+        NVIC_ClearPendingIRQ(FDCAN3_IT0_IRQn);
+        NVIC_ClearPendingIRQ(FDCAN3_IT1_IRQn);
+      }
+#else
+      if (i == 0U) {
+        NVIC_DisableIRQ(CAN1_TX_IRQn);
+        NVIC_DisableIRQ(CAN1_RX0_IRQn);
+        NVIC_DisableIRQ(CAN1_SCE_IRQn);
+        NVIC_ClearPendingIRQ(CAN1_TX_IRQn);
+        NVIC_ClearPendingIRQ(CAN1_RX0_IRQn);
+        NVIC_ClearPendingIRQ(CAN1_SCE_IRQn);
+      } else if (i == 1U) {
+        NVIC_DisableIRQ(CAN2_TX_IRQn);
+        NVIC_DisableIRQ(CAN2_RX0_IRQn);
+        NVIC_DisableIRQ(CAN2_SCE_IRQn);
+        NVIC_ClearPendingIRQ(CAN2_TX_IRQn);
+        NVIC_ClearPendingIRQ(CAN2_RX0_IRQn);
+        NVIC_ClearPendingIRQ(CAN2_SCE_IRQn);
+      } else {
+        NVIC_DisableIRQ(CAN3_TX_IRQn);
+        NVIC_DisableIRQ(CAN3_RX0_IRQn);
+        NVIC_DisableIRQ(CAN3_SCE_IRQn);
+        NVIC_ClearPendingIRQ(CAN3_TX_IRQn);
+        NVIC_ClearPendingIRQ(CAN3_RX0_IRQn);
+        NVIC_ClearPendingIRQ(CAN3_SCE_IRQn);
+      }
+#endif
+    }
+  }
+}
+
 // this is the only way to leave silent mode
 void set_safety_mode(uint16_t mode, uint16_t param) {
   uint16_t mode_copy = mode;
@@ -50,6 +98,7 @@ void set_safety_mode(uint16_t mode, uint16_t param) {
   }
   safety_tx_blocked = 0;
   safety_rx_invalid = 0;
+  can_silent_mask = 0U;
 
   switch (mode_copy) {
     case SAFETY_SILENT:
@@ -85,11 +134,11 @@ void set_safety_mode(uint16_t mode, uint16_t param) {
       can_silent = false;
       break;
   }
-  // Tesla legacy: external panda must be RX-only on CAN3 to avoid un-ACKed TX storms.
+
   if (mode_copy == SAFETY_TESLA_LEGACY) {
     const bool external_panda = (param & 0x04U) != 0U;
     if (external_panda) {
-      can_silent |= (1U << 2U);
+      can_silent_mask = (uint8_t)(can_silent_mask | (uint8_t)(1U << 2U));
     }
   }
 

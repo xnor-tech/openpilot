@@ -6,6 +6,7 @@ static bool can_set_speed(uint8_t can_number) {
   bool ret = true;
   FDCAN_GlobalTypeDef *FDCANx = CANIF_FROM_CAN_NUM(can_number);
   uint8_t bus_number = BUS_NUM_FROM_CAN_NUM(can_number);
+  bool controller_silent = can_silent || ((can_silent_mask & (uint8_t)(1U << can_number)) != 0U);
 
   ret &= llcan_set_speed(
     FDCANx,
@@ -13,7 +14,7 @@ static bool can_set_speed(uint8_t can_number) {
     bus_config[bus_number].can_data_speed,
     bus_config[bus_number].canfd_non_iso,
     can_loopback,
-    can_silent
+    controller_silent
   );
   return ret;
 }
@@ -267,3 +268,14 @@ bool can_init(uint8_t can_number) {
   }
   return ret;
 }
+
+void can_deinit(uint8_t can_number) {
+  FDCAN_GlobalTypeDef *FDCANx = CANIF_FROM_CAN_NUM(can_number);
+
+  llcan_irq_disable(FDCANx);
+  FDCANx->ILE = 0U;
+  FDCANx->IE = 0U;
+  FDCANx->IR = 0xFFFFFFFFU;
+  FDCANx->CCCR |= FDCAN_CCCR_INIT;
+}
+

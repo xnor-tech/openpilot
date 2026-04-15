@@ -14,6 +14,17 @@ uint32_t ignition_can_cnt = 0U;
 bool can_silent = true;
 bool can_loopback = false;
 
+// Per-controller CAN silent mask and enable mask for Tesla legacy dual-panda routing.
+uint8_t can_silent_mask = 0U;
+uint8_t can_controller_enable_mask = (uint8_t)((1U << PANDA_CAN_CNT) - 1U);
+static uint8_t can_controller_initialized_mask = 0U;
+
+void can_set_controller_enable_mask(uint8_t mask) {
+  can_controller_enable_mask = (uint8_t)(mask & ((1U << PANDA_CAN_CNT) - 1U));
+}
+
+void can_deinit(uint8_t can_number);
+
 // ********************* instantiate queues *********************
 #define can_buffer(x, size) \
   static CANPacket_t elems_##x[size]; \
@@ -135,10 +146,21 @@ bus_config_t bus_config[PANDA_CAN_CNT] = {
 };
 
 void can_init_all(void) {
-  for (uint8_t i=0U; i < PANDA_CAN_CNT; i++) {
+  for (uint8_t i = 0U; i < PANDA_CAN_CNT; i++) {
+    const uint8_t bit = (uint8_t)(1U << i);
+    const bool enabled = (can_controller_enable_mask & bit) != 0U;
+    const bool initialized = (can_controller_initialized_mask & bit) != 0U;
+
     bus_config[i].canfd_enabled = false;
     can_clear(can_queues[i]);
-    (void)can_init(i);
+
+    if (enabled) {
+      (void)can_init(i);
+      can_controller_initialized_mask |= bit;
+    } else if (initialized) {
+      can_deinit(i);
+      can_controller_initialized_mask = (uint8_t)(can_controller_initialized_mask & (uint8_t)(~bit));
+    }
   }
 }
 
