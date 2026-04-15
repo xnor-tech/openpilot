@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from cereal import messaging
+from cereal.services import SERVICE_LIST
 from openpilot.common.swaglog import cloudlog
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.tesla.values import CruiseButtons
@@ -130,7 +131,14 @@ class LongController:
 
   def __init__(self) -> None:
     self.acc = ACCController()
-    self._sm = messaging.SubMaster(["longitudinalPlan", "radarState", "mapdOut", "controlsState"])
+    services = ["longitudinalPlan", "radarState", "controlsState"]
+    self._has_mapd = "mapdOut" in SERVICE_LIST
+    if self._has_mapd:
+      services.insert(2, "mapdOut")
+    else:
+      cloudlog.warning("Tesla LONG_module: mapdOut not present, disabling map-based speed inputs")
+
+    self._sm = messaging.SubMaster(services)
 
     self._lp_target_last_ms: Optional[float] = None
     self._lp_target_near_ms: Optional[float] = None
@@ -1009,7 +1017,7 @@ class LongController:
     self._lead_present_prev = bool(self._lead_present)
 
     try:
-      if bool(self._sm.valid.get("mapdOut", False)):
+      if self._has_mapd and bool(self._sm.valid.get("mapdOut", False)):
         mo = self._sm["mapdOut"]
         suggested_ms = float(getattr(mo, "suggestedSpeed", 0.0) or 0.0)
         map_curve_ms = float(getattr(mo, "mapCurveSpeed", 0.0) or 0.0)
