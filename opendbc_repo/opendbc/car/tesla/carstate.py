@@ -1073,24 +1073,81 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
-    if CP.carFingerprint in LEGACY_CARS:
-      return {
-        Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.party),
-        Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party),
-        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CANBUS.powertrain),
-        Bus.ap_pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CANBUS.autopilot_powertrain),
-        Bus.chassis: CANParser(DBC[CP.carFingerprint][Bus.chassis], [], CANBUS.chassis if CP.carFingerprint == CAR.TESLA_MODEL_S_HW3 else CANBUS.party),
-        Bus.cam: CANParser(
-          DBC[CP.carFingerprint][Bus.party],
-          [
-            ("UI_driverAssistRoadSign", math.nan),
-            ("UI_driverAssistMapData", math.nan),
-          ],
-          CANBUS.powertrain,
-        ),
-      }
+    """Return CANParsers keyed by opendbc.car.Bus.
 
-    return {
-      Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.party),
-      Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party)
+    XNOR note (HW2 legacy Tesla):
+      - canValid is computed as all(cp.can_valid for cp in can_parsers.values()) in interfaces.py.
+      - Therefore every parser included here must be pointed at a bus that actually carries the
+        messages we ask it to validate.
+      - On your HW2 wiring, we have measured:
+          STW_ACTN_RQ (0x045): rx_src 0 and 130 (~10Hz each)
+          DI_state    (0x368): rx_src 0, 4, 130 (~10Hz)
+          UI_gpsVehicleSpeed (0x2f8): rx_src 0 and 130 (~1Hz)
+          EPAS_sysStatus (0x370): rx_src 0 and 130 (~25Hz)
+          DAS_steeringControl (0x488): rx_src 2 and 128 (~50Hz)
+
+    This function is written to avoid CAN error false positives by:
+      - validating party on bus0
+      - validating the mirrored party on bus130 when multiple pandas are present
+      - validating powertrain on bus4
+      - validating steering-control bus on bus2
+    """
+    # Determine whether a mirrored party bus is present (2-panda HW2 setups).
+    num_pandas = int(getattr(CP, "numPandas", 1) or 1)
+    has_mirrored_party = num_pandas > 1
+
+    # Message validation lists (msg_name_or_addr, expected_hz).
+    party_checks = [
+      ("STW_ACTN_RQ", 10),
+      ("DI_state", 10),
+      ("UI_gpsVehicleSpeed", math.nan),
+      ("EPAS_sysStatus", 25),
+    ]
+
+    mirrored_party_checks = [
+      ("STW_ACTN_RQ", 10),
+    ]
+
+    pt_checks = [
+      ("DI_state", 10),
+    ]
+
+    steer_checks = [
+      ("DAS_steeringControl", 50),
+      ("DAS_status2", math.nan),
+    ]
+
+    # Buses are the *rx_src* values we measured.
+    party_bus = CANBUS.party  # 0
+    mirrored_party_bus = 130  # measured mirror of party on HW2
+    pt_bus = CANBUS.powertrain  # 4
+    steer_bus = CANBUS.autopilot_party  # 2
+
+    # Base dict: always include the buses we truly rely on.
+    can_parsers = {
+      Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], party_checks, party_bus),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_checks, pt_bus),
+      # Use Bus.ap_pt as the steering-control bus in legacy (0x488 observed on rx_src=2/128).
+      Bus.ap_pt: CANParser(DBC[CP.carFingerprint][Bus.party], steer_checks, steer_bus),
     }
+
+    # Add mirrored party bus parser only when a 2nd panda is present.
+    if has_mirrored_party:
+      can_parsers[Bus.ap_party] = CANParser(DBC[CP.carFingerprint][Bus.party], mirrored_party_checks, mirrored_party_bus)
+    else:
+      # Single-panda fallback: keep API compatibility, but don't require a separate bus.
+      can_parsers[Bus.ap_party] = CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party)
+
+    # Keep these keys present for callers that expect them, but do not gate canValid on them.
+    # Empty check lists => cp.can_valid will converge to True once updated.
+    can_parsers[Bus.chassis] = CANParser(DBC[CP.carFingerprint][Bus.chassis], [], CANBUS.chassis if CP.carFingerprint == CAR.TESLA_MODEL_S_HW3 else CANBUS.party)
+    can_parsers[Bus.cam] = CANParser(
+      DBC[CP.carFingerprint][Bus.party],
+      [
+        ("UI_driverAssistRoadSign", math.nan),
+        ("UI_driverAssistMapData", math.nan),
+      ],
+      CANBUS.powertrain,
+    )
+
+    return can_parsers

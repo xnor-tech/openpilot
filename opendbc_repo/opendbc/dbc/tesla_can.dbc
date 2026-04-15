@@ -259,10 +259,10 @@ BO_ 872 DI_state: 8 DI
  SG_ DI_analogSpeed : 16|12@1+ (0.1,0) [0|150] "speed"  NEO
  SG_ DI_immobilizerState : 28|3@1+ (1,0) [0|0] ""  NEO
  SG_ DI_speedUnits : 31|1@1+ (1,0) [0|1] ""  NEO
- SG_ DI_cruiseSet : 32|9@1+ (0.5,0) [0|255.5] "speed"  NEO
+ SG_ DI_digitalSpeed : 32|8@1+ (1,0) [0|255.5] "speed"  NEO
  SG_ DI_aebState : 41|3@1+ (1,0) [0|0] ""  NEO
  SG_ DI_stateCounter : 44|4@1+ (1,0) [0|0] ""  NEO
- SG_ DI_digitalSpeed : 48|8@1+ (1,0) [0|250] ""  NEO
+ SG_ DI_cruiseSet : 48|8@1+ (1,0) [0|250] ""  NEO
  SG_ DI_stateChecksum : 56|8@1+ (1,0) [0|0] ""  NEO
 
 BO_ 109 SBW_RQ_SCCM: 4 STW
