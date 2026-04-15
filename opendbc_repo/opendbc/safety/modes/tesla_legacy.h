@@ -120,7 +120,7 @@ static void tesla_legacy_set_last_byte_checksum(CANPacket_t *msg) {
 
 // --- RX hook ---
 static void tesla_legacy_rx_hook(const CANPacket_t *msg) {
-  const int bus = GET_BUS(msg);
+  const int bus = (int)msg->bus;
   const int addr = (int)msg->addr;
 
   // Chassis state (HW3 uses bus1)
