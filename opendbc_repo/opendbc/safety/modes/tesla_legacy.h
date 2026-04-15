@@ -253,7 +253,7 @@ static bool tesla_legacy_tx_hook(const CANPacket_t *msg) {
     tesla_legacy_op_autopilot_disabled = (b5 & 0x80U) != 0U;
     tesla_legacy_op_stalk_main_edge = (b5 & 0x02U) != 0U;
     tesla_legacy_op_stalk_cancel_edge = (b5 & 0x01U) != 0U;
-        if (tesla_legacy_op_stalk_enable && (!tesla_legacy_has_ap_hw || tesla_legacy_op_autopilot_disabled)) {
+    if (tesla_legacy_op_stalk_enable && (!tesla_legacy_has_ap_hw || tesla_legacy_op_autopilot_disabled)) {
       if (tesla_legacy_op_stalk_main_edge) {
         pcm_cruise_check(true);
       }
@@ -400,14 +400,6 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
 
   // Unity mods only on main panda with AP HW
   if (!tesla_legacy_has_ap_hw) {
-        if (tesla_legacy_op_stalk_enable && (!tesla_legacy_has_ap_hw || tesla_legacy_op_autopilot_disabled)) {
-      if (tesla_legacy_op_stalk_main_edge) {
-        pcm_cruise_check(true);
-      }
-      if (tesla_legacy_op_stalk_cancel_edge) {
-        pcm_cruise_check(false);
-      }
-    }
     return false;
   }
 

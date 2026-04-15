@@ -257,7 +257,8 @@ static int get_fwd_bus(int bus_num) {
   return destination_bus;
 }
 
-int safety_fwd_hook(int bus_num, int addr) {
+int safety_fwd_hook(int bus_num, CANPacket_t *to_fwd) {
+  const int addr = (int)to_fwd->addr;
   bool blocked = relay_malfunction || current_safety_config.disable_forwarding;
 
   // Block messages that are being checked for relay malfunctions. Safety modes can opt out of this
@@ -271,6 +272,10 @@ int safety_fwd_hook(int bus_num, int addr) {
         break;
       }
     }
+  }
+
+  if (!blocked && (current_hooks->fwd_msg != NULL)) {
+    blocked = current_hooks->fwd_msg(bus_num, to_fwd);
   }
 
   if (!blocked && (current_hooks->fwd != NULL)) {
