@@ -1,14 +1,19 @@
+# /data/openpilot/opendbc/car/tesla/teslacan_legacy.py
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import V_CRUISE_MAX
 from opendbc.car.tesla.values import CANBUS, CarControllerParams
 
 
 class TeslaCANRaven:
+  """
+  Legacy Tesla CAN helpers (HW2 "legacy" stack).
+
+  Note: This class name historically said "Raven" in some forks. For clarity, we provide:
+    TeslaCANLegacy = TeslaCANRaven
+  """
+
   def __init__(self, packers):
     self.packers = packers
-    self.CCP = CarControllerParams
-    self.jerk_upper = self.CCP.JERK_LIMIT_MAX
-    self.jerk_lower = self.CCP.JERK_LIMIT_MIN
 
   @staticmethod
   def checksum(msg_id, dat):
@@ -28,30 +33,28 @@ class TeslaCANRaven:
     values["DAS_steeringControlChecksum"] = self.checksum(0x488, data[:3])
     return self.packers[CANBUS.party].make_can_msg("DAS_steeringControl", CANBUS.party, values)
 
-  def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active, gas_pressed):
-    set_speed = max(v_ego * CV.MS_TO_KPH, 0)
-    if active:
-      set_speed = 0 if accel < 0 else V_CRUISE_MAX
-
-    if gas_pressed:
-      self.jerk_upper = self.jerk_lower = 0.0
+  def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active, gas_pressed: bool = False, set_speed_kph: float | None = None):
+    if set_speed_kph is not None:
+      set_speed = max(float(set_speed_kph), 0.0)
     else:
-      self.jerk_lower = max(self.jerk_lower - self.CCP.JERK_RAMP_RATE, self.CCP.JERK_LIMIT_MIN)
-      self.jerk_upper = min(self.jerk_upper + self.CCP.JERK_RAMP_RATE, self.CCP.JERK_LIMIT_MAX)
+      set_speed = max(v_ego * CV.MS_TO_KPH, 0)
+      if active:
+        set_speed = 0 if accel < 0 else V_CRUISE_MAX
 
     values = {
       "DAS_setSpeed": set_speed,
       "DAS_accState": acc_state,
       "DAS_aebEvent": 0,
-      "DAS_jerkMin": self.jerk_lower,
-      "DAS_jerkMax": self.jerk_upper,
+      "DAS_jerkMin": CarControllerParams.JERK_LIMIT_MIN,
+      "DAS_jerkMax": CarControllerParams.JERK_LIMIT_MAX,
       "DAS_accelMin": accel,
       "DAS_accelMax": max(accel, 0),
       "DAS_controlCounter": counter,
     }
 
+    # Powertrain DBC uses 0x2BF for DAS_control (legacy HW2)
     data = self.packers[CANBUS.powertrain].make_can_msg("DAS_control", CANBUS.powertrain, values)[1]
-    values["DAS_controlChecksum"] = self.checksum(0x2b9, data[:7])
+    values["DAS_controlChecksum"] = self.checksum(0x2BF, data[:7])
     return self.packers[CANBUS.powertrain].make_can_msg("DAS_control", CANBUS.powertrain, values)
 
   def create_steering_allowed(self, counter):
@@ -61,5 +64,9 @@ class TeslaCANRaven:
     }
 
     data = self.packers[CANBUS.party].make_can_msg("APS_eacMonitor", CANBUS.party, values)[1]
-    values["APS_eacMonitorChecksum"] = self.checksum(0x27d, data[:2])
+    values["APS_eacMonitorChecksum"] = self.checksum(0x27D, data[:2])
     return self.packers[CANBUS.party].make_can_msg("APS_eacMonitor", CANBUS.party, values)
+
+
+# Clarity alias: HW2 is "legacy"
+TeslaCANLegacy = TeslaCANRaven
