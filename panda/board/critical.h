@@ -1,9 +1,4 @@
-#pragma once
-
-#ifdef STM32H7
-#include "board/sys/critical.h"
-#else
-#include "board/critical_declarations.h"
+#include "critical_declarations.h"
 
 // ********************* Critical section helpers *********************
 uint8_t global_critical_depth = 0U;
@@ -19,4 +14,3 @@ void disable_interrupts(void) {
   interrupts_enabled = false;
   __disable_irq();
 }
-#endif

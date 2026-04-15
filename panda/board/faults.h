@@ -1,9 +1,4 @@
-#pragma once
-
-#ifdef STM32H7
-#include "board/sys/faults.h"
-#else
-#include "board/faults_declarations.h"
+#include "faults_declarations.h"
 
 uint8_t fault_status = FAULT_STATUS_NONE;
 uint32_t faults = 0U;
@@ -28,4 +23,3 @@ void fault_recovered(uint32_t fault) {
     print("Cannot recover from a permanent fault!\n");
   }
 }
-#endif

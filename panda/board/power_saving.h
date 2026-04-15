@@ -1,19 +1,20 @@
 #pragma once
 
-#ifdef STM32H7
-#include "board/sys/power_saving.h"
-#else
-
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "board/power_saving_declarations.h"
+#include "power_saving_declarations.h"
 
+// Defined here to ensure a single linkable symbol in unity-style builds.
 __attribute__((weak)) int power_save_status = POWER_SAVE_STATUS_DISABLED;
 
+// WARNING: To stay in compliance with the SIL2 rules laid out in STM UM1840, we should never implement any of the available hardware low power modes.
+// See rule: CoU_3
+
 void enable_can_transceivers(bool enabled) {
+  // Leave main CAN always on for CAN-based ignition detection
   uint8_t main_bus = (harness.status == HARNESS_STATUS_FLIPPED) ? 3U : 1U;
-  for (uint8_t i = 1U; i <= 4U; i++) {
+  for(uint8_t i=1U; i<=4U; i++){
     current_board->enable_can_transceiver(i, (i == main_bus) || enabled);
   }
 }
@@ -25,6 +26,7 @@ void set_power_save_state(int state) {
     if (state == POWER_SAVE_STATUS_ENABLED) {
       print("enable power savings\n");
 
+      // Disable CAN interrupts
       if (harness.status == HARNESS_STATUS_FLIPPED) {
         llcan_irq_disable(cans[0]);
       } else {
@@ -46,12 +48,11 @@ void set_power_save_state(int state) {
 
     enable_can_transceivers(enable);
 
-    if (!enable) {
+    // Switch off IR when in power saving
+    if(!enable){
       current_board->set_ir_power(0U);
     }
 
     power_save_status = state;
   }
 }
-
-#endif

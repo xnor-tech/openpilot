@@ -20,7 +20,7 @@ bool can_set_speed(uint8_t can_number) {
     CANx,
     bus_config[bus_number].can_speed,
     can_loopback,
-    can_silent || ((can_silent_mask & (uint8_t)(1U << can_number)) != 0U)
+    (unsigned int)(can_silent) & (1U << can_number)
   );
   return ret;
 }
@@ -109,7 +109,7 @@ void process_can(uint8_t can_number) {
       }
 
       if (can_pop(can_queues[bus_number], &to_send)) {
-        const bool silent = can_silent || ((can_silent_mask & (uint8_t)(1U << can_number)) != 0U);
+        const bool silent = (((unsigned int)can_silent) & (1U << can_number)) != 0U;
         if (silent) {
           // RX-only controller: drop queued TX so we never request transmission on an un-ACKed bus.
           can_health[can_number].total_tx_lost_cnt += 1U;

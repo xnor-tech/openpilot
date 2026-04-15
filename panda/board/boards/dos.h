@@ -108,7 +108,7 @@ static void dos_init(void) {
   dos_set_ir_power(0U);
 
   // Bootkick
-  dos_set_bootkick(BOOT_BOOTKICK);
+  dos_set_bootkick(true);
 
   // Init clock source (camera strobe) using PWM
   clock_source_init(false);
@@ -130,15 +130,16 @@ static harness_configuration dos_harness_config = {
 board board_dos = {
   .harness_config = &dos_harness_config,
   .has_spi = false,
-  .has_fan = true,
+  .fan_max_rpm = 6500U,
+  .fan_max_pwm = 100U,
   .avdd_mV = 3300U,
+  .fan_stall_recovery = true,
   .fan_enable_cooldown_time = 3U,
   .init = dos_init,
   .init_bootloader = unused_init_bootloader,
   .enable_can_transceiver = dos_enable_can_transceiver,
   .led_GPIO = {GPIOC, GPIOC, GPIOC},
   .led_pin = {9, 7, 6},
-  .led_pwm_channels = {0U, 0U, 0U},
   .set_can_mode = dos_set_can_mode,
   .read_voltage_mV = dos_read_voltage_mV,
   .read_current_mA = unused_read_current,

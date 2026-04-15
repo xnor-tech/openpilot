@@ -6,7 +6,6 @@ static bool can_set_speed(uint8_t can_number) {
   bool ret = true;
   FDCAN_GlobalTypeDef *FDCANx = CANIF_FROM_CAN_NUM(can_number);
   uint8_t bus_number = BUS_NUM_FROM_CAN_NUM(can_number);
-  bool controller_silent = can_silent || ((can_silent_mask & (uint8_t)(1U << can_number)) != 0U);
 
   ret &= llcan_set_speed(
     FDCANx,
@@ -14,7 +13,7 @@ static bool can_set_speed(uint8_t can_number) {
     bus_config[bus_number].can_data_speed,
     bus_config[bus_number].canfd_non_iso,
     can_loopback,
-    controller_silent
+    can_silent
   );
   return ret;
 }
@@ -195,20 +194,24 @@ void can_rx(uint8_t can_number) {
     can_set_checksum(&to_push);
 
     // forwarding (panda only)
-    CANPacket_t to_send = to_push;
-    to_send.returned = 0U;
-    to_send.rejected = 0U;
-    int bus_fwd_num = safety_fwd_hook(bus_number, &to_send);
+    int bus_fwd_num = safety_fwd_hook(bus_number, to_push.addr);
     if (bus_fwd_num < 0) {
       bus_fwd_num = bus_config[can_number].forwarding_bus;
-      to_send = to_push;  // do not forward safety-mutated frame on fallback
-      to_send.returned = 0U;
-      to_send.rejected = 0U;
     }
     if (bus_fwd_num != -1) {
-      to_send.bus = (uint8_t)bus_fwd_num;
+      CANPacket_t to_send;
+
+      to_send.fd = to_push.fd;
+      to_send.returned = 0U;
+      to_send.rejected = 0U;
+      to_send.extended = to_push.extended;
+      to_send.addr = to_push.addr;
+      to_send.bus = to_push.bus;
+      to_send.data_len_code = to_push.data_len_code;
+      (void)memcpy(to_send.data, to_push.data, dlc_to_len[to_push.data_len_code]);
       can_set_checksum(&to_send);
-      can_send(&to_send, (uint8_t)bus_fwd_num, true);
+
+      can_send(&to_send, bus_fwd_num, true);
       can_health[can_number].total_fwd_cnt += 1U;
     }
 
@@ -268,14 +271,3 @@ bool can_init(uint8_t can_number) {
   }
   return ret;
 }
-
-void can_deinit(uint8_t can_number) {
-  FDCAN_GlobalTypeDef *FDCANx = CANIF_FROM_CAN_NUM(can_number);
-
-  llcan_irq_disable(FDCANx);
-  FDCANx->ILE = 0U;
-  FDCANx->IE = 0U;
-  FDCANx->IR = 0xFFFFFFFFU;
-  FDCANx->CCCR |= FDCAN_CCCR_INIT;
-}
-
