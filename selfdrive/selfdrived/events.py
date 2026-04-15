@@ -1019,6 +1019,23 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", duration=1.5),
   },
 
+
+EventName.accEnabled: {
+  ET.WARNING: Alert(
+    "Adaptive Cruise Enabled",
+    "",
+    AlertStatus.normal, AlertSize.small,
+    Priority.LOW, VisualAlert.none, AudibleAlert.engage, 1.),
+},
+
+EventName.accDisabled: {
+  ET.WARNING: Alert(
+    "Adaptive Cruise Disabled",
+    "",
+    AlertStatus.userPrompt, AlertSize.small,
+    Priority.LOW, VisualAlert.none, AudibleAlert.disengage, 1.),
+},
+
   EventName.audioFeedback: {
     ET.PERMANENT: audio_feedback_alert,
   },

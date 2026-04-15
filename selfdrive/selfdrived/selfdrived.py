@@ -186,6 +186,12 @@ class SelfdriveD:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
+      if bool(getattr(CS, "adaptiveCruiseEnabled", False)) != bool(getattr(self.CS_prev, "adaptiveCruiseEnabled", False)):
+        if bool(getattr(CS, "adaptiveCruiseEnabled", False)):
+          self.events.add(EventName.accEnabled)
+        else:
+          self.events.add(EventName.accDisabled)
+
       if self.CP.notCar:
         # wait for everything to init first
         if self.sm.frame > int(5. / DT_CTRL) and self.initialized:

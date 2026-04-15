@@ -85,6 +85,20 @@ void set_safety_mode(uint16_t mode, uint16_t param) {
       can_silent = false;
       break;
   }
+  // Tesla legacy: external panda must be RX-only on CAN3 to avoid un-ACKed TX storms.
+  if (mode_copy == SAFETY_TESLA_LEGACY) {
+    const bool external_panda = (param & 0x04U) != 0U;
+    if (external_panda) {
+      can_silent |= (1U << 2U);
+    }
+  }
+
+  uint8_t can_enable_mask = (uint8_t)((1U << PANDA_CAN_CNT) - 1U);
+  if ((mode_copy == SAFETY_TESLA_LEGACY) || (mode_copy == SAFETY_ELM327)) {
+    can_enable_mask = 0x5U;
+  }
+  can_set_controller_enable_mask(can_enable_mask);
+  disable_unused_can_irqs(can_enable_mask);
   can_init_all();
 }
 
