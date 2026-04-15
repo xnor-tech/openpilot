@@ -3,53 +3,80 @@ from opendbc.car.tesla.values import CANBUS, CarControllerParams, TeslaFlags
 
 
 def get_steer_ctrl_type(flags: int, ctrl_type: int) -> int:
-  # Returns the flipped signal value for DAS_steeringControlType on FSD 14
   if flags & TeslaFlags.FSD_14:
     return {1: 2, 2: 1}.get(ctrl_type, ctrl_type)
-  else:
-    return ctrl_type
+  return ctrl_type
+
+
+def _crc8_j1850(data: bytes) -> int:
+  crc = 0xFF
+  for b in data:
+    crc ^= b
+    for _ in range(8):
+      crc = ((crc << 1) ^ 0x1D) if (crc & 0x80) else (crc << 1)
+      crc &= 0xFF
+  return crc ^ 0xFF
+
+
+def create_fake_das_msg(pedal_enabled: bool, autopilot_disabled: bool, bus: int,
+                        stalk_main: bool = False, stalk_cancel: bool = False):
+  dat = bytearray(8)
+  dat[5] = ((0x20 if pedal_enabled else 0) |
+            (0x80 if autopilot_disabled else 0) |
+            (0x02 if stalk_main else 0) |
+            (0x01 if stalk_cancel else 0))
+  return (0x659, bytes(dat), bus)
+
+
+def create_fake_das_message(pedal_enabled: bool, autopilot_disabled: bool, *,
+                            stalk_main: bool = False, stalk_cancel: bool = False,
+                            bus: int = 0):
+  return create_fake_das_msg(pedal_enabled, autopilot_disabled, bus,
+                             stalk_main=stalk_main, stalk_cancel=stalk_cancel)
 
 
 class TeslaCAN:
-  def __init__(self, CP, packer):
-    self.CP = CP
+  def __init__(self, *args):
+    if len(args) == 2:
+      self.CP, self.packer = args
+    elif len(args) == 1:
+      self.CP, self.packer = None, args[0]
+    else:
+      raise TypeError("TeslaCAN expects (packer) or (CP, packer)")
     self.CCP = CarControllerParams
-    self.packer = packer
     self.jerk_upper = self.CCP.JERK_LIMIT_MAX
     self.jerk_lower = self.CCP.JERK_LIMIT_MIN
 
+  def _create_fake_das(self, pedal_enabled: bool, autopilot_disabled: bool, bus: int,
+                       stalk_main: bool = False, stalk_cancel: bool = False):
+    return create_fake_das_msg(pedal_enabled, autopilot_disabled, bus,
+                               stalk_main=stalk_main, stalk_cancel=stalk_cancel)
+
   def create_steering_control(self, angle, enabled):
-    # On FSD 14+, ANGLE_CONTROL behavior changed to allow user winddown while actuating.
-    # with openpilot, after overriding w/ ANGLE_CONTROL the wheel snaps back to the original angle abruptly
-    # so we now use LANE_KEEP_ASSIST to match stock FSD.
-    # see carstate.py for more details
     values = {
       "DAS_steeringAngleRequest": -angle,
       "DAS_steeringHapticRequest": 0,
-      "DAS_steeringControlType": get_steer_ctrl_type(self.CP.flags, 1 if enabled else 0),
+      "DAS_steeringControlType": get_steer_ctrl_type(getattr(self.CP, "flags", 0), 1 if enabled else 0),
     }
-
     return self.packer.make_can_msg("DAS_steeringControl", CANBUS.party, values)
 
-  def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active, gas_pressed):
+  def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active,
+                                  gas_pressed=False, set_speed_kph: float | None = None):
     from opendbc.car.interfaces import V_CRUISE_MAX
 
-    set_speed = max(v_ego * CV.MS_TO_KPH, 0)
-    if active:
-      set_speed = 0 if accel < 0 else V_CRUISE_MAX
-
-    if gas_pressed:
-      self.jerk_upper = self.jerk_lower = 0.0
+    if set_speed_kph is not None:
+      set_speed = float(max(0.0, min(float(set_speed_kph), V_CRUISE_MAX)))
     else:
-      self.jerk_lower = max(self.jerk_lower - self.CCP.JERK_RAMP_RATE, self.CCP.JERK_LIMIT_MIN)
-      self.jerk_upper = min(self.jerk_upper + self.CCP.JERK_RAMP_RATE, self.CCP.JERK_LIMIT_MAX)
+      set_speed = max(v_ego * CV.MS_TO_KPH, 0.0)
+      if active:
+        set_speed = 0.0 if accel < 0 else V_CRUISE_MAX
 
     values = {
       "DAS_setSpeed": set_speed,
       "DAS_accState": acc_state,
       "DAS_aebEvent": 0,
-      "DAS_jerkMin": self.jerk_lower,
-      "DAS_jerkMax": self.jerk_upper,
+      "DAS_jerkMin": CarControllerParams.JERK_LIMIT_MIN,
+      "DAS_jerkMax": CarControllerParams.JERK_LIMIT_MAX,
       "DAS_accelMin": accel,
       "DAS_accelMax": max(accel, 0),
       "DAS_controlCounter": counter,
@@ -60,8 +87,42 @@ class TeslaCAN:
     values = {
       "APS_eacAllow": 1,
     }
-
     return self.packer.make_can_msg("APS_eacMonitor", CANBUS.party, values)
+
+  def create_stalk_request(self, bus: int, msg_stw_actn_req: dict | None, *,
+                           cruise_button: int | None = None,
+                           turn_signal_stalk_state: int | None = None) -> tuple[int, bytes, int]:
+    values = dict(msg_stw_actn_req or {})
+    if cruise_button is not None:
+      values["SpdCtrlLvr_Stat"] = int(cruise_button)
+    if turn_signal_stalk_state is not None:
+      values["TurnIndLvr_Stat"] = int(turn_signal_stalk_state)
+
+    counter = (int(values.get("MC_STW_ACTN_RQ", 0)) + 1) % 16
+    values["MC_STW_ACTN_RQ"] = counter
+    values["CRC_STW_ACTN_RQ"] = 0
+
+    msg = self.packer.make_can_msg("STW_ACTN_RQ", int(bus), values)
+    dat = msg[1]
+    values["CRC_STW_ACTN_RQ"] = _crc8_j1850(dat[:7])
+    return self.packer.make_can_msg("STW_ACTN_RQ", int(bus), values)
+
+  def create_action_request(self, bus: int, msg_stw_actn_req: dict, cruise_button: int):
+    return self.create_stalk_request(int(bus), msg_stw_actn_req, cruise_button=int(cruise_button))
+
+  def create_body_controls_message(self, turn: int, hazard: int, bus: int, counter: int = 1):
+    values = {
+      "DAS_headlightRequest": 0,
+      "DAS_hazardLightRequest": int(hazard),
+      "DAS_wiperSpeed": 0,
+      "DAS_turnIndicatorRequest": int(turn),
+      "DAS_highLowBeamDecision": 3,
+      "DAS_highLowBeamOffReason": 5,
+      "DAS_turnIndicatorRequestReason": 1 if int(turn) > 0 else 0,
+      "DAS_bodyControlsCounter": int(counter),
+      "DAS_bodyControlsChecksum": 0,
+    }
+    return self.packer.make_can_msg("DAS_bodyControls", int(bus), values)
 
 
 def tesla_checksum(address: int, sig, d: bytearray) -> int:
