@@ -5,12 +5,51 @@ from opendbc.car.tesla.carstate import CarState
 from opendbc.car.tesla.values import TeslaSafetyFlags, TeslaFlags, CANBUS, CAR, DBC, FSD_14_FW, Ecu, TeslaLegacyParams, LEGACY_CARS
 from opendbc.car.tesla.radar_interface import RadarInterface, RADAR_START_ADDR
 from openpilot.common.params import Params
+import cereal.messaging as messaging
 
 
 class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
   RadarInterface = RadarInterface
+
+  def __init__(self, CP: structs.CarParams):
+    super().__init__(CP)
+    self._model_v2_sock = messaging.sub_sock('modelV2', conflate=True)
+
+  def post_update(self, c: structs.CarControl, ret: structs.CarState) -> None:
+    # Restore C3 HSO/ALC glue: hold human_control for the configured numb period
+    # and inject sign-correct steering torque during tap-only ALC pre-engage.
+    try:
+      self.CS.human_control = bool(self.CS.hso_controller.update_stat(
+        self.CS,
+        bool(getattr(c, 'latActive', False)),
+        c.actuators,
+        int(getattr(self.CS, '_param_frame', 0)),
+      ))
+    except Exception:
+      self.CS.human_control = False
+
+    if not getattr(self.CS, 'enableALC', False):
+      return
+
+    model_msg = messaging.recv_one_or_none(self._model_v2_sock)
+    try:
+      self.CS.alca_controller.update(
+        bool(getattr(c, 'latActive', False)),
+        self.CS,
+        int(getattr(self.CS, '_param_frame', 0)),
+        model_msg,
+      )
+    except Exception:
+      return
+
+    if getattr(self.CS, 'alca_need_engagement', False):
+      ret.steeringPressed = True
+      if int(getattr(self.CS, 'alca_direction', 0)) == 1:
+        ret.steeringTorque = 2.0
+      elif int(getattr(self.CS, 'alca_direction', 0)) == 2:
+        ret.steeringTorque = -2.0
 
   @staticmethod
   def _apply_xnor_safety_flags(ret: structs.CarParams) -> None:

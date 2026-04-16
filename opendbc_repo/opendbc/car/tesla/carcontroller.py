@@ -343,9 +343,9 @@ class CarController(CarControllerBase):
       )
       self._stw_release_frame = -1
 
-    # Legacy HW2 physical blinker hold follows STW_ACTN_RQ TurnIndLvr_Stat at ~10 Hz.
-    # Mirror the existing internal Unity-style blinker ownership already exposed via CS.out,
-    # and send one explicit release when that ownership ends.
+    # Legacy HW2 virtual indicator ownership should look like repeated comfort taps,
+    # not a rapid held-stalk refresh. Keep the first tap immediate, then re-tap at
+    # roughly stock blinker cadence while the lane change owns the direction.
     if self.CP.carFingerprint in LEGACY_CARS:
       prev_hold_turn = int(getattr(self, "_virtual_turn_prev", 0) or 0)
       last_send_frame = int(getattr(self, "_virtual_turn_last_send_frame", -100000) or -100000)
@@ -354,7 +354,7 @@ class CarController(CarControllerBase):
       if hold_turn in (1, 2):
         # Align the virtual held-stalk cadence to the moment ownership starts, so the
         # physical lamp continues with the same rhythm as the initial comfort tap.
-        if hold_turn != prev_hold_turn or (int(self.frame) - last_send_frame) >= 10:
+        if hold_turn != prev_hold_turn or (int(self.frame) - last_send_frame) >= VIRTUAL_TURN_TAP_PERIOD_FRAMES:
           send_turn = int(hold_turn)
       elif prev_hold_turn in (1, 2):
         # Release immediately when the owned lane change ends.
