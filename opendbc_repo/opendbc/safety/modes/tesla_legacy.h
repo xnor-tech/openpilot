@@ -12,16 +12,16 @@
 //
 // XNOR contract:
 //  - safetyParam uses TeslaSafetyFlags (opendbc_repo/opendbc/car/tesla/values.py):
-//      LONG_CONTROL=1, FLAG_EXTERNAL_PANDA=2, FLAG_HW1=4, FLAG_HW2=8, FLAG_HW3=16, OP_STALK_ENABLE=32
+//      LONG_CONTROL=1, FSD_14=2 (non-legacy only), FLAG_EXTERNAL_PANDA=4, FLAG_HW1=8, FLAG_HW2=16, FLAG_HW3=32, OP_STALK_ENABLE=64
 //  - Main panda: lateral TX + stock LKAS passthrough + Unity forwarding mods
 //  - External panda: longitudinal TX + stock AEB passthrough
 
 // --- safetyParam bits (TeslaSafetyFlags) ---
 #define TESLA_LEGACY_FLAG_LONG_CONTROL       0x01U
-#define TESLA_LEGACY_FLAG_EXTERNAL_PANDA     0x02U
-#define TESLA_LEGACY_FLAG_HW1                0x04U
-#define TESLA_LEGACY_FLAG_HW2                0x08U
-#define TESLA_LEGACY_FLAG_HW3                0x10U
+#define TESLA_LEGACY_FLAG_EXTERNAL_PANDA     0x04U
+#define TESLA_LEGACY_FLAG_HW1                0x08U
+#define TESLA_LEGACY_FLAG_HW2                0x10U
+#define TESLA_LEGACY_FLAG_HW3                0x20U
 #define TESLA_LEGACY_FLAG_OP_STALK_ENABLE    0x40U
 
 // --- Unity timing ---
