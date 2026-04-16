@@ -12,17 +12,16 @@
 //
 // XNOR contract:
 //  - safetyParam uses TeslaSafetyFlags (opendbc_repo/opendbc/car/tesla/values.py):
-//      LONG_CONTROL=1, FSD_14=2, FLAG_EXTERNAL_PANDA=4, FLAG_HW1=8, FLAG_HW2=16, FLAG_HW3=32, OP_STALK_ENABLE=64
+//      LONG_CONTROL=1, FLAG_EXTERNAL_PANDA=2, FLAG_HW1=4, FLAG_HW2=8, FLAG_HW3=16, OP_STALK_ENABLE=32
 //  - Main panda: lateral TX + stock LKAS passthrough + Unity forwarding mods
 //  - External panda: longitudinal TX + stock AEB passthrough
 
 // --- safetyParam bits (TeslaSafetyFlags) ---
 #define TESLA_LEGACY_FLAG_LONG_CONTROL       0x01U
-#define TESLA_LEGACY_FLAG_FSD_14             0x02U
-#define TESLA_LEGACY_FLAG_EXTERNAL_PANDA     0x04U
-#define TESLA_LEGACY_FLAG_HW1                0x08U
-#define TESLA_LEGACY_FLAG_HW2                0x10U
-#define TESLA_LEGACY_FLAG_HW3                0x20U
+#define TESLA_LEGACY_FLAG_EXTERNAL_PANDA     0x02U
+#define TESLA_LEGACY_FLAG_HW1                0x04U
+#define TESLA_LEGACY_FLAG_HW2                0x08U
+#define TESLA_LEGACY_FLAG_HW3                0x10U
 #define TESLA_LEGACY_FLAG_OP_STALK_ENABLE    0x40U
 
 // --- Unity timing ---
@@ -253,7 +252,7 @@ static bool tesla_legacy_tx_hook(const CANPacket_t *msg) {
     tesla_legacy_op_autopilot_disabled = (b5 & 0x80U) != 0U;
     tesla_legacy_op_stalk_main_edge = (b5 & 0x02U) != 0U;
     tesla_legacy_op_stalk_cancel_edge = (b5 & 0x01U) != 0U;
-    if (tesla_legacy_op_stalk_enable && (!tesla_legacy_has_ap_hw || tesla_legacy_op_autopilot_disabled)) {
+        if (tesla_legacy_op_stalk_enable && (!tesla_legacy_has_ap_hw || tesla_legacy_op_autopilot_disabled)) {
       if (tesla_legacy_op_stalk_main_edge) {
         pcm_cruise_check(true);
       }
@@ -400,6 +399,14 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
 
   // Unity mods only on main panda with AP HW
   if (!tesla_legacy_has_ap_hw) {
+        if (tesla_legacy_op_stalk_enable && (!tesla_legacy_has_ap_hw || tesla_legacy_op_autopilot_disabled)) {
+      if (tesla_legacy_op_stalk_main_edge) {
+        pcm_cruise_check(true);
+      }
+      if (tesla_legacy_op_stalk_cancel_edge) {
+        pcm_cruise_check(false);
+      }
+    }
     return false;
   }
 

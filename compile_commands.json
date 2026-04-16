@@ -144,91 +144,121 @@
         "output": "/data/openpilot/cereal/messaging/socketmaster.o"
     },
     {
-        "command": "arm-none-eabi-gcc -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -o panda/board/stm32h7/board/obj/panda_h7startup_stm32h7x5xx.o -c panda/board/stm32h7/startup_stm32h7x5xx.s",
+        "command": "arm-none-eabi-gcc -mcpu=cortex-m4 -mhard-float -DSTM32F4 -DSTM32F413xx -Iboard/stm32f4/inc -mfpu=fpv4-sp-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32f4/stm32f4_flash.ld -fsingle-precision-constant -Os -g -o panda/board/stm32f4/board/obj/pandastartup_stm32f413xx.o -c panda/board/stm32f4/startup_stm32f413xx.s",
+        "directory": "/data/openpilot",
+        "file": "/data/openpilot/panda/board/stm32f4/startup_stm32f413xx.s",
+        "output": "/data/openpilot/panda/board/stm32f4/board/obj/pandastartup_stm32f413xx.o"
+    },
+    {
+        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/pandarsa.o -c -mcpu=cortex-m4 -mhard-float -DSTM32F4 -DSTM32F413xx -Iboard/stm32f4/inc -mfpu=fpv4-sp-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32f4/stm32f4_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/rsa.c",
+        "directory": "/data/openpilot",
+        "file": "/data/openpilot/panda/board/crypto/rsa.c",
+        "output": "/data/openpilot/panda/board/crypto/board/obj/pandarsa.o"
+    },
+    {
+        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/pandasha.o -c -mcpu=cortex-m4 -mhard-float -DSTM32F4 -DSTM32F413xx -Iboard/stm32f4/inc -mfpu=fpv4-sp-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32f4/stm32f4_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/sha.c",
+        "directory": "/data/openpilot",
+        "file": "/data/openpilot/panda/board/crypto/sha.c",
+        "output": "/data/openpilot/panda/board/crypto/board/obj/pandasha.o"
+    },
+    {
+        "command": "arm-none-eabi-gcc -o panda/board/board/obj/pandabootstub.o -c -mcpu=cortex-m4 -mhard-float -DSTM32F4 -DSTM32F413xx -Iboard/stm32f4/inc -mfpu=fpv4-sp-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32f4/stm32f4_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/bootstub.c",
+        "directory": "/data/openpilot",
+        "file": "/data/openpilot/panda/board/bootstub.c",
+        "output": "/data/openpilot/panda/board/board/obj/pandabootstub.o"
+    },
+    {
+        "command": "arm-none-eabi-gcc -o panda/board/board/obj/pandamain.o -c -mcpu=cortex-m4 -mhard-float -DSTM32F4 -DSTM32F413xx -Iboard/stm32f4/inc -mfpu=fpv4-sp-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32f4/stm32f4_flash.ld -fsingle-precision-constant -Os -g -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/main.c",
+        "directory": "/data/openpilot",
+        "file": "/data/openpilot/panda/board/main.c",
+        "output": "/data/openpilot/panda/board/board/obj/pandamain.o"
+    },
+    {
+        "command": "arm-none-eabi-gcc -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -o panda/board/stm32h7/board/obj/panda_h7startup_stm32h7x5xx.o -c panda/board/stm32h7/startup_stm32h7x5xx.s",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/stm32h7/startup_stm32h7x5xx.s",
         "output": "/data/openpilot/panda/board/stm32h7/board/obj/panda_h7startup_stm32h7x5xx.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/panda_h7rsa.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/rsa.c",
+        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/panda_h7rsa.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/rsa.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/crypto/rsa.c",
         "output": "/data/openpilot/panda/board/crypto/board/obj/panda_h7rsa.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/panda_h7sha.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/sha.c",
+        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/panda_h7sha.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/sha.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/crypto/sha.c",
         "output": "/data/openpilot/panda/board/crypto/board/obj/panda_h7sha.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/board/obj/panda_h7bootstub.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/bootstub.c",
+        "command": "arm-none-eabi-gcc -o panda/board/board/obj/panda_h7bootstub.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/bootstub.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/bootstub.c",
         "output": "/data/openpilot/panda/board/board/obj/panda_h7bootstub.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/board/obj/panda_h7main.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/main.c",
+        "command": "arm-none-eabi-gcc -o panda/board/board/obj/panda_h7main.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/main.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/main.c",
         "output": "/data/openpilot/panda/board/board/obj/panda_h7main.o"
     },
     {
-        "command": "arm-none-eabi-gcc -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -o panda/board/stm32h7/board/obj/panda_jungle_h7startup_stm32h7x5xx.o -c panda/board/stm32h7/startup_stm32h7x5xx.s",
+        "command": "arm-none-eabi-gcc -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -o panda/board/stm32h7/board/obj/panda_jungle_h7startup_stm32h7x5xx.o -c panda/board/stm32h7/startup_stm32h7x5xx.s",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/stm32h7/startup_stm32h7x5xx.s",
         "output": "/data/openpilot/panda/board/stm32h7/board/obj/panda_jungle_h7startup_stm32h7x5xx.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/panda_jungle_h7rsa.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/rsa.c",
+        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/panda_jungle_h7rsa.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/rsa.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/crypto/rsa.c",
         "output": "/data/openpilot/panda/board/crypto/board/obj/panda_jungle_h7rsa.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/panda_jungle_h7sha.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/sha.c",
+        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/panda_jungle_h7sha.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/sha.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/crypto/sha.c",
         "output": "/data/openpilot/panda/board/crypto/board/obj/panda_jungle_h7sha.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/board/obj/panda_jungle_h7bootstub.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/bootstub.c",
+        "command": "arm-none-eabi-gcc -o panda/board/board/obj/panda_jungle_h7bootstub.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/bootstub.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/bootstub.c",
         "output": "/data/openpilot/panda/board/board/obj/panda_jungle_h7bootstub.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/jungle/board/obj/panda_jungle_h7main.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/jungle/main.c",
+        "command": "arm-none-eabi-gcc -o panda/board/jungle/board/obj/panda_jungle_h7main.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_JUNGLE -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/jungle/main.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/jungle/main.c",
         "output": "/data/openpilot/panda/board/jungle/board/obj/panda_jungle_h7main.o"
     },
     {
-        "command": "arm-none-eabi-gcc -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -o panda/board/stm32h7/board/obj/body_h7startup_stm32h7x5xx.o -c panda/board/stm32h7/startup_stm32h7x5xx.s",
+        "command": "arm-none-eabi-gcc -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -o panda/board/stm32h7/board/obj/body_h7startup_stm32h7x5xx.o -c panda/board/stm32h7/startup_stm32h7x5xx.s",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/stm32h7/startup_stm32h7x5xx.s",
         "output": "/data/openpilot/panda/board/stm32h7/board/obj/body_h7startup_stm32h7x5xx.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/body_h7rsa.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/rsa.c",
+        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/body_h7rsa.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/rsa.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/crypto/rsa.c",
         "output": "/data/openpilot/panda/board/crypto/board/obj/body_h7rsa.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/body_h7sha.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/sha.c",
+        "command": "arm-none-eabi-gcc -o panda/board/crypto/board/obj/body_h7sha.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/crypto/sha.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/crypto/sha.c",
         "output": "/data/openpilot/panda/board/crypto/board/obj/body_h7sha.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/board/obj/body_h7bootstub.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/bootstub.c",
+        "command": "arm-none-eabi-gcc -o panda/board/board/obj/body_h7bootstub.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -DBOOTSTUB -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/bootstub.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/bootstub.c",
         "output": "/data/openpilot/panda/board/board/obj/body_h7bootstub.o"
     },
     {
-        "command": "arm-none-eabi-gcc -o panda/board/body/board/obj/body_h7main.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0x75ABF276U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -Ipanda -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/body/main.c",
+        "command": "arm-none-eabi-gcc -o panda/board/body/board/obj/body_h7main.o -c -mcpu=cortex-m7 -mhard-float -DSTM32H7 -DSTM32H725xx -Iboard/stm32h7/inc -mfpu=fpv5-d16 -DPANDA_BODY -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0xF63F9DE2U -DCAN_PACKET_VERSION_HASH=0xBFDCEC90U -DJUNGLE_HEALTH_PACKET_VERSION=0xA39967B7U -Wall -Wextra -Wstrict-prototypes -Werror -mlittle-endian -mthumb -nostdlib -fno-builtin -std=gnu11 -fmax-errors=1 -Tpanda/board/stm32h7/stm32h7x5_flash.ld -fsingle-precision-constant -Os -g -Ipanda -Ipanda/board/stm32f4/inc -Ipanda/board/stm32h7/inc -Iopendbc_repo panda/board/body/main.c",
         "directory": "/data/openpilot",
         "file": "/data/openpilot/panda/board/body/main.c",
         "output": "/data/openpilot/panda/board/body/board/obj/body_h7main.o"

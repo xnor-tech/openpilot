@@ -214,7 +214,7 @@ typedef safety_config (*safety_hook_init)(uint16_t param);
 typedef void (*rx_hook)(const CANPacket_t *msg);
 typedef bool (*tx_hook)(const CANPacket_t *msg);  // returns true if the message is allowed
 typedef bool (*fwd_hook)(int bus_num, int addr);      // returns true if the message should be blocked from forwarding
-typedef bool (*fwd_msg_hook)(int bus_num, CANPacket_t *to_fwd);  // returns true if the message should be blocked from forwarding
+typedef bool (*fwd_msg_hook)(int bus_num, CANPacket_t *to_fwd);      // returns true if the message should be blocked from forwarding
 
 typedef struct {
   safety_hook_init init;

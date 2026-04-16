@@ -24,15 +24,15 @@ static int get_health_pkt(void *dat) {
   health->safety_mode_pkt = (uint8_t)(current_safety_mode);
   health->safety_param_pkt = current_safety_param;
   health->alternative_experience_pkt = alternative_experience;
-#ifdef STM32H7
   health->power_save_enabled_pkt = power_save_enabled;
-#else
-  health->power_save_enabled_pkt = (power_save_status == POWER_SAVE_STATUS_ENABLED);
-#endif
   health->heartbeat_lost_pkt = heartbeat_lost;
   health->safety_rx_checks_invalid_pkt = safety_rx_checks_invalid;
 
+#ifdef STM32F4
+  health->spi_error_count_pkt = 0U;
+#else
   health->spi_error_count_pkt = spi_error_count;
+#endif
 
   health->fault_status_pkt = fault_status;
   health->faults_pkt = faults;
@@ -46,10 +46,10 @@ static int get_health_pkt(void *dat) {
 
   health->som_reset_triggered = bootkick_reset_triggered;
 
-#ifdef STM32H7
-  health->sound_output_level_pkt = sound_output_level;
-#else
+#ifdef STM32F4
   health->sound_output_level_pkt = 0U;
+#else
+  health->sound_output_level_pkt = sound_output_level;
 #endif
 
   return sizeof(*health);
@@ -110,9 +110,7 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
     case 0xb5:
       set_safety_mode(SAFETY_SILENT, 0U);
       set_power_save_state(true);
-#ifdef STM32H7
       stop_mode_requested = true;
-#endif
       break;
     #endif
     // **** 0xc0: reset communications state
