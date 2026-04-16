@@ -177,6 +177,25 @@ GEAR_MAP = {
 }
 
 
+
+class CruiseButtons:
+  """SpdCtrlLvr_Stat values (tesla_can.dbc STW_ACTN_RQ)."""
+  IDLE = 0
+  CANCEL = 1      # FWD
+  MAIN = 2        # RWD
+  RES_ACCEL_2ND = 4
+  DECEL_2ND = 8
+  RES_ACCEL = 16
+  DECEL_SET = 32
+
+  @classmethod
+  def is_accel(cls, btn: int) -> bool:
+    return btn in (cls.RES_ACCEL, cls.RES_ACCEL_2ND)
+
+  @classmethod
+  def is_decel(cls, btn: int) -> bool:
+    return btn in (cls.DECEL_SET, cls.DECEL_2ND)
+
 # Add extra tolerance for average banked road since safety doesn't have the roll
 AVERAGE_ROAD_ROLL = 0.06  # ~3.4 degrees, 6% superelevation. higher actual roll lowers lateral acceleration
 

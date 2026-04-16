@@ -38,8 +38,15 @@ def flash_f4_panda(panda: Panda) -> None:
   panda.reconnect()
   cloudlog.info("Done flashing F4 panda")
 
-def get_expected_signature() -> bytes:
+def get_expected_signature(panda: Panda) -> bytes:
   try:
+    hw_type = panda.get_type()
+    if hw_type in Panda.F4_DEVICES:
+      if os.path.isfile(F4_FW_PATH):
+        return Panda.get_signature_from_firmware(F4_FW_PATH)
+      fn = os.path.join(FW_PATH, McuType.F4.config.app_fn)
+      return Panda.get_signature_from_firmware(fn)
+
     fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
     return Panda.get_signature_from_firmware(fn)
   except Exception:
@@ -64,7 +71,7 @@ def flash_panda(panda_serial: str) -> Panda:
       cloudlog.warning(f"Panda {panda_serial} is not supported (hw_type: {hw_type}), skipping flash...")
     return panda
 
-  fw_signature = get_expected_signature()
+  fw_signature = get_expected_signature(panda)
   internal_panda = panda.is_internal()
 
   panda_version = "bootstub" if panda.bootstub else panda.get_version()
