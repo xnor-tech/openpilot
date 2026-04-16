@@ -568,14 +568,25 @@ class CarController(CarControllerBase):
           float(CS.out.steeringAngleDeg),
           float(getattr(CS.out, "vEgoRaw", CS.out.vEgo)),
         )
-        apply_angle = float(apply_std_steer_angle_limits(
-          float(desired_angle),
-          float(self.apply_angle_last),
-          float(getattr(CS.out, "vEgoRaw", CS.out.vEgo)),
-          float(CS.out.steeringAngleDeg),
-          lat_active,
-          CarControllerParams.ANGLE_LIMITS,
-        ))
+        angle_limits = CarControllerParams.ANGLE_LIMITS
+        angle_rate_bp, angle_rate_up = angle_limits.ANGLE_RATE_LIMIT_UP
+        angle_rate_bp_down, angle_rate_down = angle_limits.ANGLE_RATE_LIMIT_DOWN
+        if angle_rate_bp and angle_rate_up and angle_rate_bp_down and angle_rate_down:
+          apply_angle = float(apply_std_steer_angle_limits(
+            float(desired_angle),
+            float(self.apply_angle_last),
+            float(getattr(CS.out, "vEgoRaw", CS.out.vEgo)),
+            float(CS.out.steeringAngleDeg),
+            lat_active,
+            angle_limits,
+          ))
+        else:
+          max_angle_delta = float(getattr(angle_limits, "MAX_ANGLE_RATE", 5.0))
+          apply_angle = float(np.clip(
+            float(desired_angle),
+            float(self.apply_angle_last) - max_angle_delta,
+            float(self.apply_angle_last) + max_angle_delta,
+          ))
         steer_guard_deg = float(np.interp(
           float(getattr(CS.out, "vEgoRaw", CS.out.vEgo)),
           [0.0, 10.0, 20.0, 30.0],
