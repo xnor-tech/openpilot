@@ -8,4 +8,4 @@
 
 extern int power_save_status;
 
-void set_power_save_state(int state);
+void set_power_save_state(bool enable);

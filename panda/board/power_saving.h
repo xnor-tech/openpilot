@@ -19,11 +19,9 @@ void enable_can_transceivers(bool enabled) {
   }
 }
 
-void set_power_save_state(int state) {
-  bool is_valid_state = (state == POWER_SAVE_STATUS_ENABLED) || (state == POWER_SAVE_STATUS_DISABLED);
-  if (is_valid_state && (state != power_save_status)) {
-    bool enable = false;
-    if (state == POWER_SAVE_STATUS_ENABLED) {
+void set_power_save_state(bool enable) {
+  int state = enable ? POWER_SAVE_STATUS_ENABLED : POWER_SAVE_STATUS_DISABLED;
+  if (state != power_save_status) {
       print("enable power savings\n");
 
       // Disable CAN interrupts

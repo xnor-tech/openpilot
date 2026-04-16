@@ -1,4 +1,8 @@
+#ifdef STM32F4
+#include "board/drivers/uart_declarations.h"
+#else
 #include "board/drivers/drivers.h"
+#endif
 
 // ***************************** Definitions *****************************
 

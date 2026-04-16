@@ -145,7 +145,8 @@ class Panda:
 
   F4_DEVICES = [HW_TYPE_WHITE, HW_TYPE_BLACK]
   H7_DEVICES = [HW_TYPE_RED_PANDA, HW_TYPE_TRES, HW_TYPE_CUATRO, HW_TYPE_BODY]
-  SUPPORTED_DEVICES = H7_DEVICES
+  DEPRECATED_DEVICES = (HW_TYPE_WHITE,)
+  SUPPORTED_DEVICES = [HW_TYPE_BLACK] + H7_DEVICES
 
   INTERNAL_DEVICES = (HW_TYPE_TRES, HW_TYPE_CUATRO)
 
@@ -438,12 +439,13 @@ class Panda:
     if hw_type not in self.SUPPORTED_DEVICES:
       raise RuntimeError(f"HW type {hw_type.hex()} is deprecated and can no longer be flashed.")
 
+    mcu_type = McuType.F4 if hw_type in self.F4_DEVICES else McuType.H7
     if self.up_to_date(fn=fn):
       logger.info("flash: already up to date")
       return
 
     if not fn:
-      fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
+      fn = os.path.join(FW_PATH, mcu_type.config.app_fn)
     assert os.path.isfile(fn)
     logger.debug("flash: main version is %s", self.get_version())
     if not self.bootstub:
@@ -458,7 +460,7 @@ class Panda:
     logger.debug("flash: bootstub version is %s", self.get_version())
 
     # do flash
-    Panda.flash_static(self._handle, code, mcu_type=McuType.H7)
+    Panda.flash_static(self._handle, code, mcu_type=mcu_type)
 
     # reconnect
     if reconnect:
@@ -509,7 +511,9 @@ class Panda:
   def up_to_date(self, fn=None) -> bool:
     current = self.get_signature()
     if fn is None:
-      fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
+      hw_type = self.get_type()
+      mcu_type = McuType.F4 if hw_type in self.F4_DEVICES else McuType.H7
+      fn = os.path.join(FW_PATH, mcu_type.config.app_fn)
     expected = Panda.get_signature_from_firmware(fn)
     return (current == expected)
 
