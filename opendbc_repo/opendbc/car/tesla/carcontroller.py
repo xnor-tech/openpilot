@@ -97,6 +97,8 @@ class CarController(CarControllerBase):
     self._body_controls_prev_turn = 0
     self._virtual_turn_prev = 0
     self._virtual_turn_last_send_frame = -100000
+    self._virtual_turn_release_frame = -1
+    self._virtual_turn_release_bus = int(CANBUS.party)
     self._hud_prev_enabled = False
 
     self._roadworks_main_pulls_ms: list[int] = []
@@ -343,32 +345,46 @@ class CarController(CarControllerBase):
       )
       self._stw_release_frame = -1
 
-    # Legacy HW2 virtual indicator ownership should look like repeated comfort taps,
-    # not a rapid held-stalk refresh. Keep the first tap immediate, then re-tap at
-    # roughly stock blinker cadence while the lane change owns the direction.
+    # Legacy HW2 turn ownership is better emulated as periodic comfort-tap pulses than as a
+    # continuously held stalk. Use ~0.5 s spacing to match normal indicator cadence.
     if self.CP.carFingerprint in LEGACY_CARS:
       prev_hold_turn = int(getattr(self, "_virtual_turn_prev", 0) or 0)
       last_send_frame = int(getattr(self, "_virtual_turn_last_send_frame", -100000) or -100000)
+      pulse_release_frame = int(getattr(self, "_virtual_turn_release_frame", -1) or -1)
+      pulse_released = False
 
-      send_turn = None
+      if pulse_release_frame == int(self.frame):
+        self._send_stw(
+          CS,
+          can_sends,
+          BTN_IDLE,
+          bus=int(getattr(self, "_virtual_turn_release_bus", self._stw_bus(CS))),
+          turn_signal_stalk_state=0,
+        )
+        self._virtual_turn_release_frame = -1
+        pulse_released = True
+
       if hold_turn in (1, 2):
-        # Align the virtual held-stalk cadence to the moment ownership starts, so the
-        # physical lamp continues with the same rhythm as the initial comfort tap.
-        if hold_turn != prev_hold_turn or (int(self.frame) - last_send_frame) >= VIRTUAL_TURN_TAP_PERIOD_FRAMES:
-          send_turn = int(hold_turn)
-      elif prev_hold_turn in (1, 2):
-        # Release immediately when the owned lane change ends.
-        send_turn = 0
-
-      if send_turn is not None:
+        if hold_turn != prev_hold_turn or (int(self.frame) - last_send_frame) >= 50:
+          self._send_stw(
+            CS,
+            can_sends,
+            BTN_IDLE,
+            bus=int(self._stw_bus(CS)),
+            turn_signal_stalk_state=int(hold_turn),
+          )
+          self._virtual_turn_last_send_frame = int(self.frame)
+          self._virtual_turn_release_frame = int(self.frame) + 1
+          self._virtual_turn_release_bus = int(self._stw_bus(CS))
+      elif prev_hold_turn in (1, 2) and not pulse_released:
         self._send_stw(
           CS,
           can_sends,
           BTN_IDLE,
           bus=int(self._stw_bus(CS)),
-          turn_signal_stalk_state=int(send_turn),
+          turn_signal_stalk_state=0,
         )
-        self._virtual_turn_last_send_frame = int(self.frame)
+        self._virtual_turn_release_frame = -1
 
       self._virtual_turn_prev = int(hold_turn)
 
@@ -568,24 +584,21 @@ class CarController(CarControllerBase):
           float(CS.out.steeringAngleDeg),
           float(getattr(CS.out, "vEgoRaw", CS.out.vEgo)),
         )
-        angle_limits = CarControllerParams.ANGLE_LIMITS
-        angle_rate_bp, angle_rate_up = angle_limits.ANGLE_RATE_LIMIT_UP
-        angle_rate_bp_down, angle_rate_down = angle_limits.ANGLE_RATE_LIMIT_DOWN
-        if angle_rate_bp and angle_rate_up and angle_rate_bp_down and angle_rate_down:
+        try:
           apply_angle = float(apply_std_steer_angle_limits(
             float(desired_angle),
             float(self.apply_angle_last),
             float(getattr(CS.out, "vEgoRaw", CS.out.vEgo)),
             float(CS.out.steeringAngleDeg),
             lat_active,
-            angle_limits,
+            CarControllerParams.ANGLE_LIMITS,
           ))
-        else:
-          max_angle_delta = float(getattr(angle_limits, "MAX_ANGLE_RATE", 5.0))
+        except ValueError:
+          max_angle_rate = float(getattr(CarControllerParams.ANGLE_LIMITS, "MAX_ANGLE_RATE", 5.0) or 5.0)
           apply_angle = float(np.clip(
             float(desired_angle),
-            float(self.apply_angle_last) - max_angle_delta,
-            float(self.apply_angle_last) + max_angle_delta,
+            float(self.apply_angle_last) - max_angle_rate,
+            float(self.apply_angle_last) + max_angle_rate,
           ))
         steer_guard_deg = float(np.interp(
           float(getattr(CS.out, "vEgoRaw", CS.out.vEgo)),

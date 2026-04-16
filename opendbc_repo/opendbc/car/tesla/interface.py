@@ -18,15 +18,8 @@ class CarInterface(CarInterfaceBase):
     self._model_v2_sock = messaging.sub_sock('modelV2', conflate=True)
 
   def post_update(self, c: structs.CarControl, ret: structs.CarState) -> None:
-    # Restore C3 HSO/ALC glue: hold human_control for the configured numb period
-    # and inject sign-correct steering torque during tap-only ALC pre-engage.
     try:
-      self.CS.human_control = bool(self.CS.hso_controller.update_stat(
-        self.CS,
-        bool(getattr(c, 'latActive', False)),
-        c.actuators,
-        int(getattr(self.CS, '_param_frame', 0)),
-      ))
+      self.CS.human_control = bool(self.CS.hso_controller.update_stat(self.CS, bool(getattr(c, 'latActive', False)), c.actuators, int(self.CS._param_frame)))
     except Exception:
       self.CS.human_control = False
 
@@ -35,12 +28,7 @@ class CarInterface(CarInterfaceBase):
 
     model_msg = messaging.recv_one_or_none(self._model_v2_sock)
     try:
-      self.CS.alca_controller.update(
-        bool(getattr(c, 'latActive', False)),
-        self.CS,
-        int(getattr(self.CS, '_param_frame', 0)),
-        model_msg,
-      )
+      self.CS.alca_controller.update(bool(getattr(c, 'latActive', False)), self.CS, int(self.CS._param_frame), model_msg)
     except Exception:
       return
 
