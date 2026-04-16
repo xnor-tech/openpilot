@@ -14,21 +14,34 @@ from openpilot.common.swaglog import cloudlog
 
 
 F4_FW_PATH = os.path.join(BASEDIR, "selfdrive/pandad/fw/panda_f4.bin.signed")
+F4_BUILD_FW_PATH = os.path.join(FW_PATH, McuType.F4.config.app_fn)
+
+
+def get_expected_fw_path(panda: Panda) -> str:
+  hw_type = panda.get_type()
+  if hw_type in Panda.F4_DEVICES:
+    for fn in (F4_BUILD_FW_PATH, F4_FW_PATH):
+      if os.path.isfile(fn):
+        return fn
+    return F4_BUILD_FW_PATH
+
+  return os.path.join(FW_PATH, McuType.H7.config.app_fn)
 
 def flash_f4_panda(panda: Panda) -> None:
-  if not os.path.isfile(F4_FW_PATH):
-    cloudlog.warning("F4 firmware not found, skipping deprecated panda flash")
+  fn = get_expected_fw_path(panda)
+  if not os.path.isfile(fn):
+    cloudlog.warning(f"F4 firmware not found at {fn}, skipping deprecated panda flash")
     return
 
-  expected_sig = Panda.get_signature_from_firmware(F4_FW_PATH)
+  expected_sig = Panda.get_signature_from_firmware(fn)
   panda_sig = b"" if panda.bootstub else panda.get_signature()
 
   if not panda.bootstub and panda_sig == expected_sig:
     cloudlog.info(f"F4 panda {panda.get_usb_serial()} already up to date")
     return
 
-  cloudlog.info(f"Flashing deprecated F4 panda {panda.get_usb_serial()}")
-  with open(F4_FW_PATH, "rb") as f:
+  cloudlog.info(f"Flashing deprecated F4 panda {panda.get_usb_serial()} from {fn}")
+  with open(fn, "rb") as f:
     code = f.read()
 
   if not panda.bootstub:
@@ -40,14 +53,7 @@ def flash_f4_panda(panda: Panda) -> None:
 
 def get_expected_signature(panda: Panda) -> bytes:
   try:
-    hw_type = panda.get_type()
-    if hw_type in Panda.F4_DEVICES:
-      if os.path.isfile(F4_FW_PATH):
-        return Panda.get_signature_from_firmware(F4_FW_PATH)
-      fn = os.path.join(FW_PATH, McuType.F4.config.app_fn)
-      return Panda.get_signature_from_firmware(fn)
-
-    fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
+    fn = get_expected_fw_path(panda)
     return Panda.get_signature_from_firmware(fn)
   except Exception:
     cloudlog.exception("Error computing expected signature")
@@ -71,7 +77,7 @@ def flash_panda(panda_serial: str) -> Panda:
       cloudlog.warning(f"Panda {panda_serial} is not supported (hw_type: {hw_type}), skipping flash...")
     return panda
 
-  fw_signature = get_expected_signature(panda)
+  fw_signature = get_expected_signature()
   internal_panda = panda.is_internal()
 
   panda_version = "bootstub" if panda.bootstub else panda.get_version()
