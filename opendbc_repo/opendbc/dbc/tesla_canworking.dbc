@@ -739,18 +739,6 @@ BO_ 905 DAS_status2: 8 XXX
  SG_ DAS_status2Counter : 52|4@1+ (1,0) [0|0] "" XXX
  SG_ DAS_status2Checksum : 56|8@1+ (1,0) [0|0] "" XXX
 
-
-BO_ 937 DAS_telemetry: 8 XXX
- SG_ DAS_telemetryMultiplexer : 0|8@1+ (1,0) [0|0] "" XXX
- SG_ DAS_telLeftLaneType : 8|3@1+ (1,0) [0|0] "" XXX
- SG_ DAS_telRightLaneType : 11|3@1+ (1,0) [0|0] "" XXX
- SG_ DAS_telLeftMarkerQuality : 14|2@1+ (1,0) [0|0] "" XXX
- SG_ DAS_telRightMarkerQuality : 16|2@1+ (1,0) [0|0] "" XXX
- SG_ DAS_telLeftMarkerColor : 18|2@1+ (1,0) [0|0] "" XXX
- SG_ DAS_telRightMarkerColor : 20|2@1+ (1,0) [0|0] "" XXX
- SG_ DAS_telLeftLaneCrossing : 22|1@1+ (1,0) [0|0] "" XXX
- SG_ DAS_telRightLaneCrossing : 23|1@1+ (1,0) [0|0] "" XXX
-
 BO_ 1001 DAS_bodyControls: 8 XXX
  SG_ DAS_headlightRequest : 0|2@1+ (1,0) [0|3] "" XXX
  SG_ DAS_hazardLightRequest : 2|2@1+ (1,0) [0|3] "" XXX

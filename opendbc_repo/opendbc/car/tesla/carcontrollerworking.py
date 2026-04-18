@@ -98,7 +98,6 @@ class CarController(CarControllerBase):
     self._virtual_turn_prev = 0
     self._virtual_turn_last_send_frame = -100000
     self._hud_prev_enabled = False
-    self._telemetry_prev_active = False
 
     self._roadworks_main_pulls_ms: list[int] = []
     self._roadworks_toggle_latch_until_ms = 0
@@ -394,42 +393,6 @@ class CarController(CarControllerBase):
     self._hud_prev_enabled = bool(getattr(CC, "enabled", False) or getattr(CC, "latActive", False))
     return
 
-
-
-  def _telemetry_alca_state(self, CS) -> int:
-    turn = int(getattr(CS, "alca_direction", 0) or 0)
-    if bool(getattr(CS, "alca_pre_engage", False) or getattr(CS, "alca_engaged", False)) and turn in (1, 2):
-      return turn
-    return 0
-
-  def _process_lane_telemetry(self, CS, can_sends, lane_active: bool) -> None:
-    prev_active = bool(getattr(self, "_telemetry_prev_active", False))
-
-    # First-pass IC experiment: own only DAS_telemetry (0x3A9) so the cluster can
-    # recolor the already-rendered lane markers blue without taking over DAS_status.
-    if not lane_active and not prev_active:
-      return
-
-    should_send = lane_active or (not lane_active and prev_active)
-    if (not should_send) or (lane_active and (self.frame % 10 != 0)):
-      self._telemetry_prev_active = bool(lane_active)
-      return
-
-    lane_color = 3 if lane_active else 0  # 3 = blue
-    lane_visible = bool(lane_active)
-    can_sends.append(
-      self._body_controls_can.create_telemetry_road_info(
-        lane_visible,
-        lane_visible,
-        lane_color,
-        lane_color,
-        self._telemetry_alca_state(CS),
-        int(CANBUS.party),
-      )
-    )
-
-    self._telemetry_prev_active = bool(lane_active)
-
   def _lane_positioned_target_angle(self, desired_angle_deg: float, current_angle_deg: float, v_ego: float) -> float:
     desired_angle_deg = float(desired_angle_deg)
     current_angle_deg = float(current_angle_deg)
@@ -589,8 +552,6 @@ class CarController(CarControllerBase):
       (not human_control) and
       (not steer_inhibit)
     )
-
-    self._process_lane_telemetry(CS, can_sends, lat_active)
 
     # Steering warm-up: for a short window after lateral becomes active, command current wheel angle.
     # This prevents an initial command step (EPS inhibit) when engaging with the wheel turned.

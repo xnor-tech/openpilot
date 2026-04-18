@@ -125,23 +125,6 @@ class TeslaCAN:
     return self.packer.make_can_msg("DAS_bodyControls", int(bus), values)
 
 
-  def create_telemetry_road_info(self, left_lane_visible: bool, right_lane_visible: bool,
-                                 left_lane_color: int, right_lane_color: int,
-                                 alca_state: int, bus: int):
-    values = {
-      "DAS_telemetryMultiplexer": 0,
-      "DAS_telLeftLaneType": 3 if bool(left_lane_visible) else 7,   # dashed / unknown
-      "DAS_telRightLaneType": 3 if bool(right_lane_visible) else 7,  # dashed / unknown
-      "DAS_telLeftMarkerQuality": 3 if bool(left_lane_visible) else 0,
-      "DAS_telRightMarkerQuality": 3 if bool(right_lane_visible) else 0,
-      "DAS_telLeftMarkerColor": int(left_lane_color) if bool(left_lane_visible) else 0,
-      "DAS_telRightMarkerColor": int(right_lane_color) if bool(right_lane_visible) else 0,
-      "DAS_telLeftLaneCrossing": 1 if int(alca_state) == 1 else 0,
-      "DAS_telRightLaneCrossing": 1 if int(alca_state) == 2 else 0,
-    }
-    return self.packer.make_can_msg("DAS_telemetry", int(bus), values)
-
-
 def tesla_checksum(address: int, sig, d: bytearray) -> int:
   checksum = (address & 0xFF) + ((address >> 8) & 0xFF)
   checksum_byte = sig.start_bit // 8
