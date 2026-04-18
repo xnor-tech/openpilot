@@ -125,6 +125,27 @@ class TeslaCAN:
     return self.packer.make_can_msg("DAS_bodyControls", int(bus), values)
 
 
+
+  def create_lane_message(self, lane_width_m: float, left_lane_visible: bool, right_lane_visible: bool,
+                          lane_range_m: float, c0: float, c1: float, c2: float, c3: float,
+                          left_fork: int, right_fork: int, bus: int, counter: int):
+    values = {
+      "DAS_leftLaneExists": int(bool(left_lane_visible)),
+      "DAS_rightLaneExists": int(bool(right_lane_visible)),
+      "DAS_virtualLaneWidth": float(lane_width_m),
+      "DAS_virtualLaneViewRange": float(lane_range_m),
+      "DAS_virtualLaneC0": float(c0),
+      "DAS_virtualLaneC1": float(c1),
+      "DAS_virtualLaneC2": float(c2),
+      "DAS_virtualLaneC3": float(c3),
+      "DAS_leftLineUsage": 2 if bool(left_lane_visible) else 0,
+      "DAS_rightLineUsage": 2 if bool(right_lane_visible) else 0,
+      "DAS_leftFork": int(left_fork),
+      "DAS_rightFork": int(right_fork),
+      "DAS_lanesCounter": int(counter) % 16,
+    }
+    return self.packer.make_can_msg("DAS_lanes", int(bus), values)
+
   def create_telemetry_road_info(self, left_lane_visible: bool, right_lane_visible: bool,
                                  left_lane_color: int, right_lane_color: int,
                                  alca_state: int, bus: int):

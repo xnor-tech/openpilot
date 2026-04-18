@@ -523,6 +523,7 @@ static safety_config tesla_legacy_init(uint16_t param) {
     {0x27D, 0, 3, .check_relay = false},  // APS_eacMonitor
     {0x659, 0, 8, .check_relay = false},  // OP->safety internal carrier (blocked in tx_hook)
     {0x45, 0, 8, .check_relay = false},  // STW_ACTN_RQ
+    {0x239, 0, 8, .check_relay = false},  // DAS_lanes (IC lane shape/presence)
     {0x3A9, 0, 8, .check_relay = false},  // DAS_telemetry (IC lane colors)
 
   };
@@ -531,6 +532,7 @@ static safety_config tesla_legacy_init(uint16_t param) {
     {0x2BF, 0, 8, .check_relay = false},  // DAS_longControl
     {0x659, 0, 8, .check_relay = false},  // OP->safety internal carrier (blocked in tx_hook)
     {0x45, 0, 8, .check_relay = false},  // STW_ACTN_RQ
+    {0x239, 0, 8, .check_relay = false},  // DAS_lanes (IC lane shape/presence)
     {0x3A9, 0, 8, .check_relay = false},  // DAS_telemetry (IC lane colors)
 
   };

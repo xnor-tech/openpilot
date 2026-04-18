@@ -405,8 +405,8 @@ class CarController(CarControllerBase):
   def _process_lane_telemetry(self, CS, can_sends, lane_active: bool) -> None:
     prev_active = bool(getattr(self, "_telemetry_prev_active", False))
 
-    # First-pass IC experiment: own only DAS_telemetry (0x3A9) so the cluster can
-    # recolor the already-rendered lane markers blue without taking over DAS_status.
+    # Phase 2 IC experiment: own DAS_lanes (0x239) plus DAS_telemetry (0x3A9).
+    # Telemetry alone did not recolor AP2-rendered lanes, so provide lane presence/shape too.
     if not lane_active and not prev_active:
       return
 
@@ -415,8 +415,27 @@ class CarController(CarControllerBase):
       self._telemetry_prev_active = bool(lane_active)
       return
 
-    lane_color = 3 if lane_active else 0  # 3 = blue
     lane_visible = bool(lane_active)
+    lane_color = 3 if lane_visible else 0  # 3 = blue
+    lane_counter = (int(self.frame) // 10) % 16
+    lane_range_m = 80.0 if lane_visible else 0.0
+
+    can_sends.append(
+      self._body_controls_can.create_lane_message(
+        3.7,
+        lane_visible,
+        lane_visible,
+        lane_range_m,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0,
+        0,
+        int(CANBUS.party),
+        lane_counter,
+      )
+    )
     can_sends.append(
       self._body_controls_can.create_telemetry_road_info(
         lane_visible,
