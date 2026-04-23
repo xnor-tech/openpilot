@@ -121,9 +121,18 @@ static void tesla_legacy_scrub_status2_warnings(CANPacket_t *msg) {
   uint32_t w0 = (uint32_t)GET_BYTES(msg, 0, 4);
   uint32_t w1 = (uint32_t)GET_BYTES(msg, 4, 4);
 
-  // Keep speed/status fields, clear transient PMM/AEB/activation warning fields.
-  w0 &= 0xFC0003FFU;
-  w1 &= 0x00F0FFFFU;
+  // Keep speed/offset/counter, but force AP warning/fault fields to Unity-like idle values.
+  w0 &= ~((0x7U << 10) | (1U << 13) | (0x3U << 14) |
+          (0x7U << 16) | (0x3U << 19) | (0x7U << 21) |
+          (0x3U << 24) | (0x1FU << 26) | (1U << 31));
+  w1 &= ~((0xFFU << 0) | (0xFU << 16) | (0xFFU << 24));
+
+  w0 |= (1U << 26);     // DAS_ACC_report = target CIPV / benign active target
+  w0 |= (1U << 31);     // DAS_lssState bit 0
+  w1 |= 0x03U;          // DAS_lssState bits 1..2 => 7/off
+  w1 |= (1U << 2);      // DAS_radarTelemetry = normal
+  w1 |= (2U << 4);      // DAS_robState = active
+  w1 |= (0x0FU << 16);  // DAS_longCollisionWarning = SNA / no warning
 
   msg->data[0] = (uint8_t)(w0 & 0xFFU);
   msg->data[1] = (uint8_t)((w0 >> 8) & 0xFFU);
@@ -139,8 +148,12 @@ static void tesla_legacy_scrub_status2_warnings(CANPacket_t *msg) {
 static void tesla_legacy_scrub_status_warnings(CANPacket_t *msg, uint8_t autopilot_status) {
   msg->data[0] = (uint8_t)((msg->data[0] & 0xF0U) | (autopilot_status & 0x0FU));
   msg->data[2] &= 0x3FU;  // DAS_forwardCollisionWarning = 0
+  msg->data[3] &= 0x3FU;  // DAS_sideCollisionAvoid = 0
+  msg->data[4] = 0U;      // DAS_sideCollisionWarning/Inhibit/CSA/LDW = 0
   tesla_legacy_set_last_byte_checksum(msg);
 }
+
+
 
 // --- RX hook ---
 static void tesla_legacy_rx_hook(const CANPacket_t *msg) {
@@ -435,10 +448,17 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
     return false;
   }
 
-  // bus0 -> bus2: block IC/HUD frames + eacStatus workaround
+  // bus0 -> bus2: block IC/HUD frames only while OP owns the HUD/status path.
   if (bus_num == 0) {
-    if ((addr == 0x399) || (addr == 0x389) || (addr == 0x239) || (addr == 0x309) ||
-        (addr == 0x3A9) || (addr == 0x329) || (addr == 0x349) || (addr == 0x369)) {
+    const bool op_hud_owner = tesla_legacy_op_autopilot_disabled &&
+                              !tesla_legacy_autopilot_enabled &&
+                              !tesla_legacy_eac_enabled &&
+                              !tesla_legacy_autopark_enabled;
+    const bool op_hud_active = op_hud_owner && (controls_allowed || tesla_legacy_hide_errors_armed);
+
+    // Do not block these during startup/ready. Blocking them before engagement can make the IC flash AP/AEB unavailable.
+    if (op_hud_active && ((addr == 0x399) || (addr == 0x389) || (addr == 0x309) ||
+                          (addr == 0x329) || (addr == 0x349) || (addr == 0x369))) {
       return true;
     }
 
@@ -454,15 +474,16 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
     return false;
   }
 
-  // bus2 -> bus0: mutate forwarded HUD status for OP ownership on legacy AP cars
+  // bus2 -> bus0: mutate forwarded HUD status only once OP is actually controlling.
   if (bus_num == 2) {
-    // Active OP ownership: keep stock speed-limit fields, only lift status/failure bits.
-    if (controls_allowed && tesla_legacy_op_autopilot_disabled &&
-        !tesla_legacy_autopilot_enabled && !tesla_legacy_eac_enabled && !tesla_legacy_autopark_enabled) {
+    const bool op_hud_owner = tesla_legacy_op_autopilot_disabled &&
+                              !tesla_legacy_autopilot_enabled &&
+                              !tesla_legacy_eac_enabled &&
+                              !tesla_legacy_autopark_enabled;
+    if (controls_allowed && op_hud_owner) {
       if (addr == 0x389) {
         tesla_legacy_scrub_status2_warnings(to_fwd);
       } else if (addr == 0x399) {
-        // AutopilotStatus is the LOW nibble on this DBC. Unity HUD used state 5 when enabled.
         tesla_legacy_scrub_status_warnings(to_fwd, 0x05U);
       } else {
       }
@@ -523,8 +544,6 @@ static safety_config tesla_legacy_init(uint16_t param) {
     {0x27D, 0, 3, .check_relay = false},  // APS_eacMonitor
     {0x659, 0, 8, .check_relay = false},  // OP->safety internal carrier (blocked in tx_hook)
     {0x45, 0, 8, .check_relay = false},  // STW_ACTN_RQ
-    {0x239, 0, 8, .check_relay = false},  // DAS_lanes (IC lane shape/presence)
-    {0x3A9, 0, 8, .check_relay = false},  // DAS_telemetry (IC lane colors)
 
   };
 
@@ -532,8 +551,6 @@ static safety_config tesla_legacy_init(uint16_t param) {
     {0x2BF, 0, 8, .check_relay = false},  // DAS_longControl
     {0x659, 0, 8, .check_relay = false},  // OP->safety internal carrier (blocked in tx_hook)
     {0x45, 0, 8, .check_relay = false},  // STW_ACTN_RQ
-    {0x239, 0, 8, .check_relay = false},  // DAS_lanes (IC lane shape/presence)
-    {0x3A9, 0, 8, .check_relay = false},  // DAS_telemetry (IC lane colors)
 
   };
 
