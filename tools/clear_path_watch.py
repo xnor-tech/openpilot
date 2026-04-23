@@ -5,9 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import signal
-import sys
 import threading
 import time
 from collections import deque
@@ -97,9 +95,15 @@ def _lead_summary(lead: Any) -> dict[str, Any]:
     "vLead": _safe_float(_maybe_attr(lead, "vLead", 0.0)),
     "vLeadK": _safe_float(_maybe_attr(lead, "vLeadK", 0.0)),
     "aLeadK": _safe_float(_maybe_attr(lead, "aLeadK", 0.0)),
+    "dPath": _safe_float(_maybe_attr(lead, "dPath", 0.0)),
+    "vLat": _safe_float(_maybe_attr(lead, "vLat", 0.0)),
+    "aLeadTau": _safe_float(_maybe_attr(lead, "aLeadTau", 0.0)),
     "modelProb": _safe_float(_maybe_attr(lead, "modelProb", 0.0)),
+    "prob": _safe_float(_maybe_attr(lead, "prob", 0.0)),
     "radar": _safe_bool(_maybe_attr(lead, "radar", False)),
     "fcw": _safe_bool(_maybe_attr(lead, "fcw", False)),
+    "source": _safe_str(_maybe_attr(lead, "source", "")),
+    "trackId": _safe_int(_maybe_attr(lead, "trackId", -1), -1),
   }
 
 
@@ -112,7 +116,11 @@ def _car_state_summary(cs: Any) -> dict[str, Any]:
     "gasPressed": _safe_bool(_maybe_attr(cs, "gasPressed", False)),
     "brakePressed": _safe_bool(_maybe_attr(cs, "brakePressed", False)),
     "steeringAngleDeg": _safe_float(_maybe_attr(cs, "steeringAngleDeg", 0.0)),
+    "steeringRateDeg": _safe_float(_maybe_attr(cs, "steeringRateDeg", 0.0)),
+    "steeringTorque": _safe_float(_maybe_attr(cs, "steeringTorque", 0.0)),
+    "steeringTorqueEps": _safe_float(_maybe_attr(cs, "steeringTorqueEps", 0.0)),
     "steeringPressed": _safe_bool(_maybe_attr(cs, "steeringPressed", False)),
+    "yawRate": _safe_float(_maybe_attr(cs, "yawRate", 0.0)),
     "leftBlinker": _safe_bool(_maybe_attr(cs, "leftBlinker", False)),
     "rightBlinker": _safe_bool(_maybe_attr(cs, "rightBlinker", False)),
     "speedLimit": _safe_float(_maybe_attr(cs, "speedLimit", 0.0)),
@@ -146,6 +154,25 @@ def _controls_state_summary(cs: Any) -> dict[str, Any]:
       out[name] = value
     elif value is not None:
       out[name] = _safe_float(value, 0.0)
+
+  lateral_state = _maybe_attr(cs, "lateralControlState", None)
+  if lateral_state is not None:
+    state_name = ""
+    try:
+      state_name = lateral_state.which()
+    except Exception:
+      state_name = ""
+    out["lateralStateName"] = _safe_str(state_name)
+    if state_name:
+      lat_state = _maybe_attr(lateral_state, state_name, None)
+      if lat_state is not None:
+        out["lateralState"] = {
+          "saturated": _safe_bool(_maybe_attr(lat_state, "saturated", False)),
+          "steeringAngleDeg": _safe_float(_maybe_attr(lat_state, "steeringAngleDeg", 0.0)),
+          "output": _safe_float(_maybe_attr(lat_state, "output", 0.0)),
+          "desiredCurvature": _safe_float(_maybe_attr(lat_state, "desiredCurvature", 0.0)),
+          "actualCurvature": _safe_float(_maybe_attr(lat_state, "actualCurvature", 0.0)),
+        }
   return out
 
 
@@ -160,9 +187,10 @@ def _plan_summary(lp: Any) -> dict[str, Any]:
   p_near = min(speeds[:near_window]) if near_window > 0 else None
   p_preview = min(speeds[:preview_window]) if preview_window > 0 else None
 
-  out = {
+  return {
     "hasLead": _safe_bool(_maybe_attr(lp, "hasLead", False)),
     "aTarget": _safe_float(_maybe_attr(lp, "aTarget", 0.0)),
+    "vTarget": _safe_float(_maybe_attr(lp, "vTarget", 0.0)),
     "vCruise": _safe_float(_maybe_attr(lp, "vCruise", 0.0)),
     "vCruiseCluster": _safe_float(_maybe_attr(lp, "vCruiseCluster", 0.0)),
     "desiredTF": _safe_float(_maybe_attr(lp, "desiredFollowDistance", 0.0)),
@@ -177,7 +205,6 @@ def _plan_summary(lp: Any) -> dict[str, Any]:
     "p_near": p_near,
     "p_preview": p_preview,
   }
-  return out
 
 
 def _mapd_summary(mo: Any) -> dict[str, Any]:
@@ -223,7 +250,32 @@ def _model_summary(model: Any) -> dict[str, Any]:
       "v": vs[0] if vs else None,
     })
 
+  lane_lines: list[dict[str, Any]] = []
+  try:
+    lines = list(_maybe_attr(model, "laneLines", []) or [])[:4]
+  except Exception:
+    lines = []
+  try:
+    line_probs = list(_maybe_attr(model, "laneLineProbs", []) or [])[:4]
+  except Exception:
+    line_probs = []
+
+  for i, line in enumerate(lines):
+    xs = _take_numeric(_maybe_attr(line, "x", None), 3)
+    ys = _take_numeric(_maybe_attr(line, "y", None), 3)
+    lane_lines.append({
+      "prob": _safe_float(line_probs[i], 0.0) if i < len(line_probs) else 0.0,
+      "x0": xs[0] if xs else None,
+      "y0": ys[0] if ys else None,
+    })
+
+  position = _maybe_attr(model, "position", None)
+  out["position"] = {
+    "x0": (_take_numeric(_maybe_attr(position, "x", None), 1) or [None])[0],
+    "y0": (_take_numeric(_maybe_attr(position, "y", None), 1) or [None])[0],
+  }
   out["leadsV3"] = leads_out
+  out["laneLines"] = lane_lines
   return out
 
 
@@ -233,11 +285,17 @@ def _derive_flags(*, car: dict[str, Any], plan: dict[str, Any], lead1: dict[str,
   v_ego = _safe_float(car.get("vEgo"), 0.0)
   p_near = plan.get("p_near")
   p_preview = plan.get("p_preview")
+  a_target = _safe_float(plan.get("aTarget"), 0.0)
   plan_drop = False
   if isinstance(p_near, (float, int)) and current_set > 0.0:
     plan_drop = float(p_near) < (current_set - 1.0)
   no_actual_lead = not bool(lead1.get("status")) and not bool(lead2.get("status"))
   long_src = _safe_str((long_log or {}).get("src", ""))
+  vrels = []
+  for val in (_safe_float(lead1.get("vRel"), 0.0), _safe_float(lead2.get("vRel"), 0.0)):
+    if val != 0.0:
+      vrels.append(val)
+  primary_vrel = min(vrels) if vrels else 0.0
   return {
     "clearRoadCandidate": bool(no_actual_lead and not _safe_bool(car.get("brakePressed", False)) and v_ego > 4.0),
     "plannerDropVsSet": bool(plan_drop),
@@ -248,15 +306,62 @@ def _derive_flags(*, car: dict[str, Any], plan: dict[str, Any], lead1: dict[str,
     "vEgo": v_ego,
     "pNear": p_near,
     "pPreview": p_preview,
+    "closingLead": bool((lead1.get("status") or lead2.get("status")) and (primary_vrel < -0.5 or a_target < -0.15)),
+    "steeringBusy": bool(abs(_safe_float(car.get("steeringAngleDeg"), 0.0)) > 8.0 or abs(_safe_float(car.get("steeringRateDeg"), 0.0)) > 25.0),
   }
 
 
+class FlapTracker:
+  def __init__(self) -> None:
+    self.last_primary = "none"
+    self.last_present = False
+    self.last_status_change_ms: int | None = None
+    self.primary_switches = 0
+    self.presence_toggles = 0
+    self.dropout_short = 0
+    self.last_dropout_ms: int | None = None
+
+  def update(self, mono_ms: int, lead1: dict[str, Any], lead2: dict[str, Any]) -> dict[str, Any]:
+    primary = "lead1" if lead1.get("status") else ("lead2" if lead2.get("status") else "none")
+    present = primary != "none"
+
+    if primary != self.last_primary:
+      self.primary_switches += 1
+      if self.last_primary != "none" and primary == "none":
+        self.last_dropout_ms = mono_ms
+      elif self.last_primary == "none" and primary != "none" and self.last_dropout_ms is not None:
+        gap_ms = mono_ms - self.last_dropout_ms
+        if gap_ms <= 1200:
+          self.dropout_short += 1
+      self.last_primary = primary
+
+    if present != self.last_present:
+      self.presence_toggles += 1
+      self.last_status_change_ms = mono_ms
+      self.last_present = present
+
+    return {
+      "primary": primary,
+      "present": present,
+      "primarySwitches": self.primary_switches,
+      "presenceToggles": self.presence_toggles,
+      "shortDropouts": self.dropout_short,
+      "sinceStatusChangeMs": 0 if self.last_status_change_ms is None else max(0, mono_ms - self.last_status_change_ms),
+    }
+
+
 class SwaglogTail:
-  KEYWORD = "[XNOR_CRUISE_SYNC]"
+  KEYWORDS = (
+    "[XNOR_CRUISE_SYNC]",
+    "lead_guard",
+    "lead_stuck_cancel",
+    "mapd_cap",
+    "mapd_comfort",
+  )
 
   def __init__(self) -> None:
     self._lock = threading.Lock()
-    self._recent: deque[dict[str, Any]] = deque(maxlen=40)
+    self._recent: deque[dict[str, Any]] = deque(maxlen=80)
     self._positions: dict[str, int] = {}
     self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -272,17 +377,16 @@ class SwaglogTail:
       return self._recent[-1] if self._recent else None
 
   def _log_files(self) -> list[Path]:
-    files = [Path("/data/log")]
     out: list[Path] = []
-    for folder in files:
-      if not folder.exists():
-        continue
-      try:
-        for path in sorted(folder.glob("swaglog*")):
-          if path.is_file():
-            out.append(path)
-      except Exception:
-        continue
+    folder = Path("/data/log")
+    if not folder.exists():
+      return out
+    try:
+      for path in sorted(folder.glob("swaglog*")):
+        if path.is_file():
+          out.append(path)
+    except Exception:
+      pass
     return out
 
   def _run(self) -> None:
@@ -320,7 +424,7 @@ class SwaglogTail:
     self._positions[key] = pos
 
   def _process_line(self, line: str) -> None:
-    if self.KEYWORD not in line:
+    if not any(keyword in line for keyword in self.KEYWORDS):
       return
 
     raw_message = line
@@ -352,9 +456,9 @@ class SwaglogTail:
       if "=" not in token:
         continue
       k, v = token.split("=", 1)
-      if k in ("src", "uom", "reason"):
+      if k in ("src", "uom", "reason", "mode", "state"):
         record[k] = v
-      elif k in ("tgt", "cur", "est"):
+      elif k in ("tgt", "cur", "est", "gap", "delta", "cooldown", "stuck", "vrel", "drel"):
         record[k] = _safe_float(v, 0.0)
       elif k == "btn":
         record[k] = _safe_int(v, 0)
@@ -366,24 +470,31 @@ class SwaglogTail:
 def _write_summary_line(txt_f, record: dict[str, Any]) -> None:
   flags = record["derived"]
   long_log = record.get("long_log") or {}
+  flap = record.get("leadState", {})
   line = (
     f"{record['wall_time']} "
     f"vEgo={flags['vEgo']:.2f} "
     f"set={flags['currentSet']:.2f} "
     f"clear={int(flags['clearRoadCandidate'])} "
     f"plannerDrop={int(flags['plannerDropVsSet'])} "
+    f"closing={int(flags['closingLead'])} "
+    f"steerBusy={int(flags['steeringBusy'])} "
     f"lead1={int(record['radarState']['leadOne'].get('status', False))} "
     f"lead2={int(record['radarState']['leadTwo'].get('status', False))} "
+    f"leadSel={_safe_str(flap.get('primary', '-'))} "
+    f"toggles={_safe_int(flap.get('presenceToggles', 0))} "
     f"src={flags['longSource'] or '-'} "
     f"tgt={_safe_float(long_log.get('tgt'), 0.0):.2f} "
-    f"cur={_safe_float(long_log.get('cur'), 0.0):.2f}"
+    f"cur={_safe_float(long_log.get('cur'), 0.0):.2f} "
+    f"btn={_safe_int(long_log.get('btn'), 0)} "
+    f"reason={_safe_str(long_log.get('reason'), '-')}"
   )
   txt_f.write(line + "\n")
   txt_f.flush()
 
 
 def main() -> int:
-  parser = argparse.ArgumentParser(description="Watch clear-road handoff inputs + LONG owner output.")
+  parser = argparse.ArgumentParser(description="Watch clear-road handoff, lead stability, and LONG owner output.")
   parser.add_argument("duration_s", nargs="?", type=int, default=300, help="Run duration in seconds")
   parser.add_argument("--interval-ms", type=int, default=100, help="Sampling interval in milliseconds")
   args = parser.parse_args()
@@ -402,6 +513,7 @@ def main() -> int:
 
   tail = SwaglogTail()
   tail.start()
+  flap_tracker = FlapTracker()
 
   ts = datetime.now().strftime("%Y%m%d_%H%M%S")
   out_dir = Path("/data")
@@ -433,6 +545,8 @@ def main() -> int:
       model = _model_summary(sm["modelV2"]) if sm.seen["modelV2"] else {}
       mapd = _mapd_summary(sm["mapdOut"]) if sm.seen["mapdOut"] else {}
       long_log = tail.latest()
+      lead_state = flap_tracker.update(now_ms, radar["leadOne"], radar["leadTwo"])
+
       record = {
         "wall_time": _wall_iso(),
         "mono_ms": now_ms,
@@ -444,8 +558,9 @@ def main() -> int:
         "longitudinalPlan": plan,
         "modelV2": model,
         "mapdOut": mapd,
+        "leadState": lead_state,
         "long_log": long_log,
-        "recent_long_logs": tail.recent()[-8:],
+        "recent_long_logs": tail.recent()[-12:],
       }
       record["derived"] = _derive_flags(
         car=car,
@@ -458,12 +573,17 @@ def main() -> int:
       jsonl_f.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
       jsonl_f.flush()
 
-      interesting = False
       d = record["derived"]
+      interesting = False
       if d["clearRoadCandidate"] and d["plannerDropVsSet"]:
         interesting = True
       if d["longHasPlannerOwner"] or d["longHasCurveOwner"]:
         interesting = True
+      if lead_state["present"] and (lead_state["sinceStatusChangeMs"] < 1500 or lead_state["shortDropouts"] > 0):
+        interesting = True
+      if d["closingLead"] and d["plannerDropVsSet"]:
+        interesting = True
+
       if interesting:
         _write_summary_line(txt_f, record)
 
