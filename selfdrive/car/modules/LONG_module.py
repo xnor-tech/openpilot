@@ -104,6 +104,12 @@ class LongController:
   _MAPD_ONLY_HIGHWAY_NEAR_STEER_DEG = 2.5
   _LEAD_CLEAR_MAPD_GRACE_MS = 900
   _LEAD_CLEAR_OPENING_GRACE_MS = 220
+  _LEAD_CURVE_HOLD_MAX_MS = 700
+  _LEAD_CURVE_HOLD_MAX_GAP_M = 110.0
+  _LEAD_CURVE_HOLD_MAX_YREL_M = 2.8
+  _LEAD_CURVE_HOLD_MIN_SPEED_MS = 6.0
+  _LEAD_CURVE_HOLD_STEER_DEG = 3.0
+  _LEAD_CURVE_HOLD_STEER_RATE_DEG = 6.0
   _CURVE_REENTRY_BLOCK_MS = 1800
   _CURVE_REENTRY_ALLOW_DROP_MS = 6.0 * CV.MPH_TO_MS
   _CURVE_REENTRY_ALLOW_STEER_DEG = 2.0
@@ -196,6 +202,12 @@ class LongController:
     self._lead_last_drel: float = 0.0
     self._lead_last_vrel: float = 0.0
     self._lead_last_yrel: float = 0.0
+    self._lead_curve_hold_until_ms: int = 0
+    self._lead_curve_hold_started_ms: int = 0
+    self._lead_curve_hold_drel: float = 0.0
+    self._lead_curve_hold_vrel: float = 0.0
+    self._lead_curve_hold_yrel: float = 0.0
+    self._lead_curve_hold_active: bool = False
     self._curve_recent_clear_until_ms: int = 0
     self._curve_limit_guard_candidate_since_ms: int = 0
     self._curve_limit_guard_release_candidate_since_ms: int = 0
@@ -697,6 +709,52 @@ class LongController:
   def _reset_lead_hold(self) -> None:
     self._lead_hold_until_ms = 0
 
+  def _reset_lead_curve_hold(self) -> None:
+    self._lead_curve_hold_until_ms = 0
+    self._lead_curve_hold_started_ms = 0
+    self._lead_curve_hold_drel = 0.0
+    self._lead_curve_hold_vrel = 0.0
+    self._lead_curve_hold_yrel = 0.0
+    self._lead_curve_hold_active = False
+
+  def _lead_curve_hold_steer_busy(self, cs_out) -> bool:
+    current_angle_deg = abs(float(getattr(cs_out, "steeringAngleDeg", 0.0) or 0.0))
+    current_rate_deg = abs(float(getattr(cs_out, "steeringRateDeg", 0.0) or 0.0))
+    return bool(
+      current_angle_deg >= float(self._LEAD_CURVE_HOLD_STEER_DEG)
+      or current_rate_deg >= float(self._LEAD_CURVE_HOLD_STEER_RATE_DEG)
+    )
+
+  def _lead_curve_hold_should_arm(self, *, now_ms: int, v_ego_ms: float, cs_out) -> bool:
+    if float(v_ego_ms) < float(self._LEAD_CURVE_HOLD_MIN_SPEED_MS):
+      return False
+    if not self._lead_curve_hold_steer_busy(cs_out):
+      return False
+    if float(self._lead_last_drel) <= 0.0:
+      return False
+    if float(self._lead_last_drel) > float(self._LEAD_CURVE_HOLD_MAX_GAP_M):
+      return False
+    if abs(float(self._lead_last_yrel)) > float(self._LEAD_CURVE_HOLD_MAX_YREL_M):
+      return False
+    if self._lead_last_sample_was_opening_clear():
+      return False
+    if int(now_ms) <= int(self._lead_curve_hold_until_ms):
+      return False
+    return True
+
+  def _lead_curve_hold_use(self, *, now_ms: int, v_ego_ms: float, cs_out) -> bool:
+    if int(now_ms) > int(self._lead_curve_hold_until_ms):
+      return False
+    if float(v_ego_ms) < float(self._LEAD_CURVE_HOLD_MIN_SPEED_MS):
+      return False
+    if not self._lead_curve_hold_steer_busy(cs_out):
+      return False
+    if float(self._lead_curve_hold_drel) <= 0.0:
+      return False
+    if abs(float(self._lead_curve_hold_yrel)) > float(self._LEAD_CURVE_HOLD_MAX_YREL_M):
+      return False
+    return True
+
   def _lead_is_opening_clear(self, *, base_target_ms: float, v_ego_ms: float) -> bool:
     if (not self._lead_present) or float(self._lead_drel) <= 0.0:
       return False
@@ -1038,7 +1096,7 @@ class LongController:
     guarded_target_ms = max(float(self.MIN_CRUISE_SPEED_MS), float(curve_target_ms) - float(extra_drop_ms))
     return float(guarded_target_ms), True, str(guard_reason)
 
-  def _poll_plan_and_lead(self, *, now_ns: int) -> None:
+  def _poll_plan_and_lead(self, *, now_ns: int, cs_out) -> None:
     prev_lead_present = bool(self._lead_present_prev)
     try:
       self._sm.update(0)
@@ -1061,27 +1119,68 @@ class LongController:
       pass
 
     try:
+      now_ms = int(now_ns // 1_000_000)
+      v_ego_ms = float(getattr(cs_out, "vEgo", 0.0) or 0.0)
       self._lead_present = False
       self._lead_drel = 0.0
       self._lead_vrel = 0.0
       self._lead_yrel = 0.0
+      self._lead_curve_hold_active = False
+
+      raw_lead_present = False
+      raw_d_rel = 0.0
+      raw_v_rel = 0.0
+      raw_y_rel = 0.0
+
       if bool(self._sm.valid.get("radarState", False)):
         rs = self._sm["radarState"]
         lead_one = getattr(rs, "leadOne", None)
         if lead_one is not None and bool(getattr(lead_one, "status", False)):
-          d_rel = float(getattr(lead_one, "dRel", 0.0) or 0.0)
-          v_rel = float(getattr(lead_one, "vRel", 0.0) or 0.0)
-          y_rel = float(getattr(lead_one, "yRel", 0.0) or 0.0)
-          if d_rel > 0.0:
+          raw_d_rel = float(getattr(lead_one, "dRel", 0.0) or 0.0)
+          raw_v_rel = float(getattr(lead_one, "vRel", 0.0) or 0.0)
+          raw_y_rel = float(getattr(lead_one, "yRel", 0.0) or 0.0)
+          raw_lead_present = raw_d_rel > 0.0
+
+      if raw_lead_present:
+        self._lead_present = True
+        self._lead_drel = raw_d_rel
+        self._lead_vrel = raw_v_rel
+        self._lead_yrel = raw_y_rel
+        self._lead_last_drel = raw_d_rel
+        self._lead_last_vrel = raw_v_rel
+        self._lead_last_yrel = raw_y_rel
+        self._reset_lead_curve_hold()
+      else:
+        if prev_lead_present and self._lead_curve_hold_should_arm(
+          now_ms=now_ms,
+          v_ego_ms=float(v_ego_ms),
+          cs_out=cs_out,
+        ):
+          self._lead_curve_hold_started_ms = int(now_ms)
+          self._lead_curve_hold_until_ms = int(now_ms) + int(self._LEAD_CURVE_HOLD_MAX_MS)
+          self._lead_curve_hold_drel = float(self._lead_last_drel)
+          self._lead_curve_hold_vrel = float(self._lead_last_vrel)
+          self._lead_curve_hold_yrel = float(self._lead_last_yrel)
+
+        if self._lead_curve_hold_use(
+          now_ms=now_ms,
+          v_ego_ms=float(v_ego_ms),
+          cs_out=cs_out,
+        ):
+          elapsed_s = max(0.0, float(now_ms - int(self._lead_curve_hold_started_ms)) / 1000.0)
+          est_d_rel = float(self._lead_curve_hold_drel) + (float(self._lead_curve_hold_vrel) * elapsed_s)
+          if est_d_rel > 0.1:
             self._lead_present = True
-            self._lead_drel = d_rel
-            self._lead_vrel = v_rel
-            self._lead_yrel = y_rel
-            self._lead_last_drel = d_rel
-            self._lead_last_vrel = v_rel
-            self._lead_last_yrel = y_rel
+            self._lead_drel = est_d_rel
+            self._lead_vrel = float(self._lead_curve_hold_vrel)
+            self._lead_yrel = float(self._lead_curve_hold_yrel)
+            self._lead_curve_hold_active = True
+          else:
+            self._reset_lead_curve_hold()
+        else:
+          self._reset_lead_curve_hold()
     except Exception:
-      pass
+      self._reset_lead_curve_hold()
 
     try:
       self._refresh_lateral_limit_state(now_ns=int(now_ns))
@@ -1183,6 +1282,8 @@ class LongController:
 
 
   def _lead_follow_hold_needed(self, *, base_target_ms: float, v_ego_ms: float) -> bool:
+    if bool(self._lead_curve_hold_active) and float(self._lead_drel) > 0.0:
+      return True
     if (not self._lead_present) or float(self._lead_drel) <= 0.0:
       return False
     if abs(float(self._lead_yrel)) >= float(self._LEAD_OFFLANE_YREL_M):
@@ -1483,6 +1584,8 @@ class LongController:
       self._last_lp_seen_ns = 0
       self._reset_curve_hold()
       self._reset_lead_hold()
+      self._reset_lead_curve_hold()
+      self._reset_lead_curve_hold()
       self._reset_lead_stuck_cancel()
       self._curve_limit_guard_active = False
       self._curve_limit_guard_candidate_since_ms = 0
@@ -1497,6 +1600,7 @@ class LongController:
       self._last_active = False
       self._reset_curve_hold()
       self._reset_lead_hold()
+      self._reset_lead_curve_hold()
       self._reset_lead_stuck_cancel()
       self._curve_limit_guard_active = False
       self._curve_limit_guard_candidate_since_ms = 0
@@ -1517,7 +1621,7 @@ class LongController:
     speed_units = str(getattr(CS, "speed_units", "MPH") or "MPH")
     cruise_buttons = int(getattr(CS, "cruise_buttons", int(CruiseButtons.IDLE)) or 0)
 
-    self._poll_plan_and_lead(now_ns=now_ns)
+    self._poll_plan_and_lead(now_ns=now_ns, cs_out=cs_out)
     lp_fresh = (
       (self._lp_target_last_ms is not None)
       and (int(self._lp_last_ns) > 0)
@@ -1608,6 +1712,7 @@ class LongController:
           self._reset_curve_hold()
         elif (not self._lead_present) and (not self._lp_has_lead):
           self._reset_lead_hold()
+          self._reset_lead_curve_hold()
           reference_ms = self._reference_speed_ms(
             base_target_ms=float(base_target_ms),
             current_set_ms=float(current_set_ms),
@@ -1680,7 +1785,8 @@ class LongController:
           if float(desired_ms) > (float(lead_hold_cap_ms) + (0.25 * CV.MPH_TO_MS)):
             desired_ms = float(lead_hold_cap_ms)
             src = f"{src}+lead_present_hold"
-
+          if bool(self._lead_curve_hold_active) and "lead_curve_hold" not in src:
+            src = f"{src}+lead_curve_hold"
 
         desired_ms, lead_nibble_held = self._apply_lead_nibble_hold(
           desired_ms=float(desired_ms),
@@ -1759,6 +1865,7 @@ class LongController:
           self._reset_curve_hold()
         elif (not self._lead_present) and (not self._lp_has_lead):
           self._reset_lead_hold()
+          self._reset_lead_curve_hold()
           current_angle_deg = abs(float(getattr(cs_out, "steeringAngleDeg", 0.0) or 0.0))
           planner_curve_margin_ms = max(
             float(self._CURVE_RELEASE_NEAR_TARGET_MARGIN_MS),
