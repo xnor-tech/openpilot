@@ -154,6 +154,23 @@ class LongController:
   _LEAD_STUCK_CANCEL_NO_DROP_MS = 650
   _LEAD_STUCK_CANCEL_REPEAT_MS = 1800
 
+  _LEAD_APPROACH_CANCEL_MIN_SPEED_MS = 18.0 * CV.MPH_TO_MS
+  _LEAD_APPROACH_CANCEL_MAX_SPEED_MS = 58.0 * CV.MPH_TO_MS
+  _LEAD_APPROACH_CANCEL_MIN_DROP_MS = 4.0 * CV.MPH_TO_MS
+  _LEAD_APPROACH_CANCEL_PLANNER_MARGIN_MS = 2.0 * CV.MPH_TO_MS
+  _LEAD_APPROACH_CANCEL_SET_DROP_EPS_MS = 0.4 * CV.MPH_TO_MS
+  _LEAD_APPROACH_CANCEL_CLOSING_MS = -0.50
+  _LEAD_APPROACH_CANCEL_OPENING_RESET_MS = 0.70
+  _LEAD_APPROACH_CANCEL_ATARGET_MS2 = -0.75
+  _LEAD_APPROACH_CANCEL_STRONG_ATARGET_MS2 = -1.25
+  _LEAD_APPROACH_CANCEL_TIME_GAP_S = 1.60
+  _LEAD_APPROACH_CANCEL_MIN_GAP_M = 10.0
+  _LEAD_APPROACH_CANCEL_MAX_GAP_M = 34.0
+  _LEAD_APPROACH_CANCEL_CRITICAL_GAP_M = 18.0
+  _LEAD_APPROACH_CANCEL_MIN_ACTIVE_MS = 650
+  _LEAD_APPROACH_CANCEL_NO_DROP_MS = 500
+  _LEAD_APPROACH_CANCEL_REPEAT_MS = 1800
+
   def __init__(self) -> None:
     self.acc = ACCController()
     services = ["longitudinalPlan", "radarState", "controlsState"]
@@ -221,11 +238,20 @@ class LongController:
     self._lead_stuck_last_drop_ms: int = 0
     self._lead_stuck_last_set_ms: float = 0.0
     self._lead_stuck_last_cancel_ms: int = 0
+    self._lead_approach_candidate_since_ms: int = 0
+    self._lead_approach_last_drop_ms: int = 0
+    self._lead_approach_last_set_ms: float = 0.0
+    self._lead_approach_last_cancel_ms: int = 0
 
   def _reset_lead_stuck_cancel(self) -> None:
     self._lead_stuck_candidate_since_ms = 0
     self._lead_stuck_last_drop_ms = 0
     self._lead_stuck_last_set_ms = 0.0
+
+  def _reset_lead_approach_cancel(self) -> None:
+    self._lead_approach_candidate_since_ms = 0
+    self._lead_approach_last_drop_ms = 0
+    self._lead_approach_last_set_ms = 0.0
 
 
   def _rate_log(self, msg: str) -> None:
@@ -1436,6 +1462,97 @@ class LongController:
     return bool(planner_below_ref and (planner_below_ego or planner_decel))
 
 
+  def _lead_approach_cancel_needed(
+    self,
+    *,
+    now_ms: int,
+    desired_ms: float,
+    current_set_ms: float,
+    v_ego_ms: float,
+    planner_last_ms: float,
+    planner_near_ms: float,
+    brake_pressed: bool,
+  ) -> bool:
+    if bool(brake_pressed):
+      self._reset_lead_approach_cancel()
+      return False
+    if (not self._lead_present) or float(self._lead_drel) <= 0.0:
+      self._reset_lead_approach_cancel()
+      return False
+    if abs(float(self._lead_yrel)) >= float(self._LEAD_OFFLANE_YREL_M):
+      self._reset_lead_approach_cancel()
+      return False
+    if float(v_ego_ms) < float(self._LEAD_APPROACH_CANCEL_MIN_SPEED_MS):
+      self._reset_lead_approach_cancel()
+      return False
+    if float(v_ego_ms) > float(self._LEAD_APPROACH_CANCEL_MAX_SPEED_MS):
+      self._reset_lead_approach_cancel()
+      return False
+    if float(current_set_ms) <= 0.1 or float(desired_ms) <= 0.1:
+      self._reset_lead_approach_cancel()
+      return False
+
+    set_drop_needed_ms = float(current_set_ms) - float(desired_ms)
+    if set_drop_needed_ms < float(self._LEAD_APPROACH_CANCEL_MIN_DROP_MS):
+      self._reset_lead_approach_cancel()
+      return False
+
+    planner_floor_ms = min(float(planner_last_ms), float(planner_near_ms))
+    planner_supported = bool(
+      planner_floor_ms > 0.1
+      and planner_floor_ms < (float(current_set_ms) - float(self._LEAD_APPROACH_CANCEL_PLANNER_MARGIN_MS))
+      and (
+        planner_floor_ms < (float(v_ego_ms) - (0.4 * CV.MPH_TO_MS))
+        or float(self._lp_a_target) <= float(self._LEAD_APPROACH_CANCEL_ATARGET_MS2)
+      )
+    )
+    if not planner_supported:
+      self._reset_lead_approach_cancel()
+      return False
+
+    gap_limit_m = min(
+      float(self._LEAD_APPROACH_CANCEL_MAX_GAP_M),
+      max(float(self._LEAD_APPROACH_CANCEL_MIN_GAP_M), float(v_ego_ms) * float(self._LEAD_APPROACH_CANCEL_TIME_GAP_S)),
+    )
+    if float(self._lead_drel) > float(gap_limit_m):
+      self._reset_lead_approach_cancel()
+      return False
+
+    critical_gap = float(self._lead_drel) <= float(self._LEAD_APPROACH_CANCEL_CRITICAL_GAP_M)
+    closing_now = float(self._lead_vrel) <= float(self._LEAD_APPROACH_CANCEL_CLOSING_MS)
+    strong_decel_plan = float(self._lp_a_target) <= float(self._LEAD_APPROACH_CANCEL_STRONG_ATARGET_MS2)
+    if not (closing_now or (critical_gap and strong_decel_plan)):
+      if float(self._lead_vrel) >= float(self._LEAD_APPROACH_CANCEL_OPENING_RESET_MS) and float(self._lp_a_target) > float(self._LEAD_APPROACH_CANCEL_ATARGET_MS2):
+        self._reset_lead_approach_cancel()
+      return False
+
+    now = int(now_ms)
+    if self._lead_approach_candidate_since_ms <= 0:
+      self._lead_approach_candidate_since_ms = now
+      self._lead_approach_last_drop_ms = now
+      self._lead_approach_last_set_ms = float(current_set_ms)
+      return False
+
+    drop_eps_ms = float(self._LEAD_APPROACH_CANCEL_SET_DROP_EPS_MS)
+    if float(current_set_ms) < (float(self._lead_approach_last_set_ms) - drop_eps_ms):
+      self._lead_approach_last_drop_ms = now
+      self._lead_approach_last_set_ms = float(current_set_ms)
+      return False
+    if float(current_set_ms) > (float(self._lead_approach_last_set_ms) + drop_eps_ms):
+      self._lead_approach_last_set_ms = float(current_set_ms)
+
+    if (now - int(self._lead_approach_last_cancel_ms)) < int(self._LEAD_APPROACH_CANCEL_REPEAT_MS):
+      return False
+
+    active_long_enough = (now - int(self._lead_approach_candidate_since_ms)) >= int(self._LEAD_APPROACH_CANCEL_MIN_ACTIVE_MS)
+    no_set_drop_long_enough = (now - int(self._lead_approach_last_drop_ms)) >= int(self._LEAD_APPROACH_CANCEL_NO_DROP_MS)
+    if bool(active_long_enough and no_set_drop_long_enough):
+      self._lead_approach_last_cancel_ms = now
+      return True
+
+    return False
+
+
   def _lead_stuck_cancel_needed(
     self,
     *,
@@ -1449,20 +1566,25 @@ class LongController:
   ) -> bool:
     if bool(brake_pressed):
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       return False
     if (not self._lead_present) or float(self._lead_drel) <= 0.0:
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       return False
     if abs(float(self._lead_yrel)) >= float(self._LEAD_OFFLANE_YREL_M):
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       return False
     if float(current_set_ms) <= 0.1 or float(desired_ms) <= 0.1:
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       return False
 
     set_drop_needed_ms = float(current_set_ms) - float(desired_ms)
     if set_drop_needed_ms < float(self._LEAD_STUCK_CANCEL_MIN_DROP_MS):
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       return False
 
     planner_floor_ms = min(float(planner_last_ms), float(planner_near_ms))
@@ -1472,10 +1594,12 @@ class LongController:
     )
     if not planner_supported:
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       return False
 
     if float(self._lead_vrel) > float(self._LEAD_STUCK_CANCEL_MIN_CLOSING_MS):
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       return False
 
     gap_limit_m = min(
@@ -1484,6 +1608,7 @@ class LongController:
     )
     if float(self._lead_drel) > float(gap_limit_m):
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       return False
 
     now = int(now_ms)
@@ -1587,6 +1712,7 @@ class LongController:
       self._reset_lead_curve_hold()
       self._reset_lead_curve_hold()
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       self._curve_limit_guard_active = False
       self._curve_limit_guard_candidate_since_ms = 0
       self._curve_limit_guard_release_candidate_since_ms = 0
@@ -1602,6 +1728,7 @@ class LongController:
       self._reset_lead_hold()
       self._reset_lead_curve_hold()
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
       self._curve_limit_guard_active = False
       self._curve_limit_guard_candidate_since_ms = 0
       self._curve_limit_guard_release_candidate_since_ms = 0
@@ -1613,6 +1740,7 @@ class LongController:
       self._last_lp_seen_ns = 0
       self._reset_lead_hold()
       self._reset_lead_stuck_cancel()
+      self._reset_lead_approach_cancel()
     self._last_active = True
 
     cs_out = getattr(CS, "out", None)
@@ -2057,6 +2185,26 @@ class LongController:
 
     stock_cruise_enabled = stock_state in ("ENABLED", "OVERRIDE", "STANDSTILL")
     brake_pressed = bool(getattr(cs_out, "brakePressed", False))
+
+    if stock_cruise_enabled and self._lead_approach_cancel_needed(
+      now_ms=int(now),
+      desired_ms=float(desired_ms),
+      current_set_ms=float(current_set_ms),
+      v_ego_ms=float(v_ego_ms),
+      planner_last_ms=float(planner_last_ms),
+      planner_near_ms=float(planner_near_ms),
+      brake_pressed=bool(brake_pressed),
+    ):
+      kph_to_u = CV.KPH_TO_MPH if speed_units == "MPH" else 1.0
+      target_u = float(desired_ms) * CV.MS_TO_KPH * kph_to_u
+      current_u = float(current_set_ms) * CV.MS_TO_KPH * kph_to_u
+      msg = (
+        f"[XNOR_CRUISE_SYNC] src={src}+lead_approach_cancel uom={speed_units} "
+        f"tgt={target_u:.1f} cur={current_u:.1f} est=0.0 "
+        f"btn={int(CruiseButtons.CANCEL)} reason=cancel[lead_approach]"
+      )
+      self._rate_log(msg)
+      return LongDecision(int(CruiseButtons.CANCEL), msg)
 
     if stock_cruise_enabled and self._lead_stuck_cancel_needed(
       now_ms=int(now),
