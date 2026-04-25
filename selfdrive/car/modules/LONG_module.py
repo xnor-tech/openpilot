@@ -171,6 +171,26 @@ class LongController:
   _LEAD_APPROACH_CANCEL_NO_DROP_MS = 500
   _LEAD_APPROACH_CANCEL_REPEAT_MS = 1800
 
+  _SECONDARY_LEAD_FALLBACK_MAX_YREL_M = 1.8
+  _SECONDARY_LEAD_FALLBACK_MAX_GAP_M = 70.0
+  _SECONDARY_LEAD_FALLBACK_LAST_DREL_DELTA_M = 18.0
+
+  _LOW_SPEED_LEAD_BLOCK_MAX_SPEED_MS = 35.0 * CV.MPH_TO_MS
+  _LOW_SPEED_LEAD_BLOCK_TIME_GAP_S = 1.35
+  _LOW_SPEED_LEAD_BLOCK_MIN_GAP_M = 8.0
+  _LOW_SPEED_LEAD_BLOCK_MAX_GAP_M = 16.0
+  _LOW_SPEED_LEAD_BLOCK_OPENING_VREL_MS = 1.0
+  _LOW_SPEED_LEAD_BLOCK_TARGET_MARGIN_MS = 0.35 * CV.MPH_TO_MS
+
+  _LEAD_CLOSE_CANCEL_MIN_SPEED_MS = 5.0 * CV.MPH_TO_MS
+  _LEAD_CLOSE_CANCEL_MAX_SPEED_MS = 32.0 * CV.MPH_TO_MS
+  _LEAD_CLOSE_CANCEL_TIME_GAP_S = 1.10
+  _LEAD_CLOSE_CANCEL_MIN_GAP_M = 6.0
+  _LEAD_CLOSE_CANCEL_MAX_GAP_M = 11.0
+  _LEAD_CLOSE_CANCEL_OPENING_VREL_MS = 0.75
+  _LEAD_CLOSE_CANCEL_MIN_ACTIVE_MS = 360
+  _LEAD_CLOSE_CANCEL_REPEAT_MS = 1600
+
   def __init__(self) -> None:
     self.acc = ACCController()
     services = ["longitudinalPlan", "radarState", "controlsState"]
@@ -242,6 +262,8 @@ class LongController:
     self._lead_approach_last_drop_ms: int = 0
     self._lead_approach_last_set_ms: float = 0.0
     self._lead_approach_last_cancel_ms: int = 0
+    self._lead_close_cancel_candidate_since_ms: int = 0
+    self._lead_close_cancel_last_cancel_ms: int = 0
 
   def _reset_lead_stuck_cancel(self) -> None:
     self._lead_stuck_candidate_since_ms = 0
@@ -252,6 +274,9 @@ class LongController:
     self._lead_approach_candidate_since_ms = 0
     self._lead_approach_last_drop_ms = 0
     self._lead_approach_last_set_ms = 0.0
+
+  def _reset_lead_close_cancel(self) -> None:
+    self._lead_close_cancel_candidate_since_ms = 0
 
 
   def _rate_log(self, msg: str) -> None:
@@ -1122,6 +1147,29 @@ class LongController:
     guarded_target_ms = max(float(self.MIN_CRUISE_SPEED_MS), float(curve_target_ms) - float(extra_drop_ms))
     return float(guarded_target_ms), True, str(guard_reason)
 
+  @staticmethod
+  def _lead_values(lead) -> tuple[bool, float, float, float]:
+    if lead is None or not bool(getattr(lead, "status", False)):
+      return False, 0.0, 0.0, 0.0
+    try:
+      d_rel = float(getattr(lead, "dRel", 0.0) or 0.0)
+      v_rel = float(getattr(lead, "vRel", 0.0) or 0.0)
+      y_rel = float(getattr(lead, "yRel", 0.0) or 0.0)
+    except Exception:
+      return False, 0.0, 0.0, 0.0
+    return bool(d_rel > 0.0), d_rel, v_rel, y_rel
+
+  def _secondary_lead_fallback_allowed(self, *, d_rel: float, y_rel: float) -> bool:
+    if float(d_rel) <= 0.0:
+      return False
+    if float(d_rel) > float(self._SECONDARY_LEAD_FALLBACK_MAX_GAP_M):
+      return False
+    if abs(float(y_rel)) > float(self._SECONDARY_LEAD_FALLBACK_MAX_YREL_M):
+      return False
+    if float(self._lead_last_drel) <= 0.0:
+      return True
+    return abs(float(d_rel) - float(self._lead_last_drel)) <= float(self._SECONDARY_LEAD_FALLBACK_LAST_DREL_DELTA_M)
+
   def _poll_plan_and_lead(self, *, now_ns: int, cs_out) -> None:
     prev_lead_present = bool(self._lead_present_prev)
     try:
@@ -1161,11 +1209,16 @@ class LongController:
       if bool(self._sm.valid.get("radarState", False)):
         rs = self._sm["radarState"]
         lead_one = getattr(rs, "leadOne", None)
-        if lead_one is not None and bool(getattr(lead_one, "status", False)):
-          raw_d_rel = float(getattr(lead_one, "dRel", 0.0) or 0.0)
-          raw_v_rel = float(getattr(lead_one, "vRel", 0.0) or 0.0)
-          raw_y_rel = float(getattr(lead_one, "yRel", 0.0) or 0.0)
-          raw_lead_present = raw_d_rel > 0.0
+        lead_two = getattr(rs, "leadTwo", None)
+
+        raw_lead_present, raw_d_rel, raw_v_rel, raw_y_rel = self._lead_values(lead_one)
+        if not raw_lead_present:
+          lead_two_present, lead_two_d_rel, lead_two_v_rel, lead_two_y_rel = self._lead_values(lead_two)
+          if lead_two_present and self._secondary_lead_fallback_allowed(d_rel=lead_two_d_rel, y_rel=lead_two_y_rel):
+            raw_lead_present = True
+            raw_d_rel = lead_two_d_rel
+            raw_v_rel = lead_two_v_rel
+            raw_y_rel = lead_two_y_rel
 
       if raw_lead_present:
         self._lead_present = True
@@ -1462,6 +1515,94 @@ class LongController:
     return bool(planner_below_ref and (planner_below_ego or planner_decel))
 
 
+  def _low_speed_lead_block_target(
+    self,
+    *,
+    now_ms: int,
+    desired_ms: float,
+    current_set_ms: float,
+    v_ego_ms: float,
+  ) -> tuple[float, bool]:
+    del now_ms
+    if (not self._lead_present) or float(self._lead_drel) <= 0.0:
+      return float(desired_ms), False
+    if abs(float(self._lead_yrel)) >= float(self._LEAD_OFFLANE_YREL_M):
+      return float(desired_ms), False
+    if float(v_ego_ms) > float(self._LOW_SPEED_LEAD_BLOCK_MAX_SPEED_MS):
+      return float(desired_ms), False
+    if self._lead_is_opening_clear(base_target_ms=max(float(current_set_ms), float(desired_ms)), v_ego_ms=float(v_ego_ms)):
+      return float(desired_ms), False
+
+    gap_limit_m = min(
+      float(self._LOW_SPEED_LEAD_BLOCK_MAX_GAP_M),
+      max(float(self._LOW_SPEED_LEAD_BLOCK_MIN_GAP_M), float(v_ego_ms) * float(self._LOW_SPEED_LEAD_BLOCK_TIME_GAP_S)),
+    )
+    if float(self._lead_drel) > float(gap_limit_m):
+      return float(desired_ms), False
+    if float(self._lead_vrel) > float(self._LOW_SPEED_LEAD_BLOCK_OPENING_VREL_MS):
+      return float(desired_ms), False
+
+    no_accel_ceiling_ms = max(0.0, float(v_ego_ms) - float(self._LOW_SPEED_LEAD_BLOCK_TARGET_MARGIN_MS))
+    if float(current_set_ms) > 0.1:
+      no_accel_ceiling_ms = min(float(no_accel_ceiling_ms), float(current_set_ms))
+    blocked_ms = min(float(desired_ms), float(no_accel_ceiling_ms))
+    return float(blocked_ms), bool(blocked_ms < (float(desired_ms) - 0.05))
+
+  def _lead_close_cancel_needed(
+    self,
+    *,
+    now_ms: int,
+    current_set_ms: float,
+    v_ego_ms: float,
+    brake_pressed: bool,
+  ) -> bool:
+    if bool(brake_pressed):
+      self._reset_lead_close_cancel()
+      return False
+    if (not self._lead_present) or float(self._lead_drel) <= 0.0:
+      self._reset_lead_close_cancel()
+      return False
+    if abs(float(self._lead_yrel)) >= float(self._LEAD_OFFLANE_YREL_M):
+      self._reset_lead_close_cancel()
+      return False
+    if float(v_ego_ms) < float(self._LEAD_CLOSE_CANCEL_MIN_SPEED_MS):
+      self._reset_lead_close_cancel()
+      return False
+    if float(v_ego_ms) > float(self._LEAD_CLOSE_CANCEL_MAX_SPEED_MS):
+      self._reset_lead_close_cancel()
+      return False
+    if float(current_set_ms) <= 0.1:
+      self._reset_lead_close_cancel()
+      return False
+    if self._lead_is_opening_clear(base_target_ms=float(current_set_ms), v_ego_ms=float(v_ego_ms)):
+      self._reset_lead_close_cancel()
+      return False
+    if float(self._lead_vrel) > float(self._LEAD_CLOSE_CANCEL_OPENING_VREL_MS):
+      self._reset_lead_close_cancel()
+      return False
+
+    gap_limit_m = min(
+      float(self._LEAD_CLOSE_CANCEL_MAX_GAP_M),
+      max(float(self._LEAD_CLOSE_CANCEL_MIN_GAP_M), float(v_ego_ms) * float(self._LEAD_CLOSE_CANCEL_TIME_GAP_S)),
+    )
+    if float(self._lead_drel) > float(gap_limit_m):
+      self._reset_lead_close_cancel()
+      return False
+
+    now = int(now_ms)
+    if self._lead_close_cancel_candidate_since_ms <= 0:
+      self._lead_close_cancel_candidate_since_ms = now
+      return False
+
+    if (now - int(self._lead_close_cancel_last_cancel_ms)) < int(self._LEAD_CLOSE_CANCEL_REPEAT_MS):
+      return False
+    if (now - int(self._lead_close_cancel_candidate_since_ms)) < int(self._LEAD_CLOSE_CANCEL_MIN_ACTIVE_MS):
+      return False
+
+    self._lead_close_cancel_last_cancel_ms = now
+    return True
+
+
   def _lead_approach_cancel_needed(
     self,
     *,
@@ -1475,21 +1616,27 @@ class LongController:
   ) -> bool:
     if bool(brake_pressed):
       self._reset_lead_approach_cancel()
+      self._reset_lead_close_cancel()
       return False
     if (not self._lead_present) or float(self._lead_drel) <= 0.0:
       self._reset_lead_approach_cancel()
+      self._reset_lead_close_cancel()
       return False
     if abs(float(self._lead_yrel)) >= float(self._LEAD_OFFLANE_YREL_M):
       self._reset_lead_approach_cancel()
+      self._reset_lead_close_cancel()
       return False
     if float(v_ego_ms) < float(self._LEAD_APPROACH_CANCEL_MIN_SPEED_MS):
       self._reset_lead_approach_cancel()
+      self._reset_lead_close_cancel()
       return False
     if float(v_ego_ms) > float(self._LEAD_APPROACH_CANCEL_MAX_SPEED_MS):
       self._reset_lead_approach_cancel()
+      self._reset_lead_close_cancel()
       return False
     if float(current_set_ms) <= 0.1 or float(desired_ms) <= 0.1:
       self._reset_lead_approach_cancel()
+      self._reset_lead_close_cancel()
       return False
 
     set_drop_needed_ms = float(current_set_ms) - float(desired_ms)
@@ -2169,6 +2316,15 @@ class LongController:
         desired_ms = min(float(desired_ms), max(float(self.MIN_CRUISE_SPEED_MS), float(lead_speed_ms)))
         src = f"{src}+stale_lead"
 
+    desired_ms, lead_low_speed_blocked = self._low_speed_lead_block_target(
+      now_ms=int(now),
+      desired_ms=float(desired_ms),
+      current_set_ms=float(current_set_ms),
+      v_ego_ms=float(v_ego_ms),
+    )
+    if lead_low_speed_blocked:
+      src = f"{src}+lead_low_speed_block"
+
     no_lead_curve_context = (not self._lead_present) and (not self._lp_has_lead)
     if not no_lead_curve_context:
       self._curve_limit_guard_active = False
@@ -2185,6 +2341,23 @@ class LongController:
 
     stock_cruise_enabled = stock_state in ("ENABLED", "OVERRIDE", "STANDSTILL")
     brake_pressed = bool(getattr(cs_out, "brakePressed", False))
+
+    if stock_cruise_enabled and self._lead_close_cancel_needed(
+      now_ms=int(now),
+      current_set_ms=float(current_set_ms),
+      v_ego_ms=float(v_ego_ms),
+      brake_pressed=bool(brake_pressed),
+    ):
+      kph_to_u = CV.KPH_TO_MPH if speed_units == "MPH" else 1.0
+      target_u = float(desired_ms) * CV.MS_TO_KPH * kph_to_u
+      current_u = float(current_set_ms) * CV.MS_TO_KPH * kph_to_u
+      msg = (
+        f"[XNOR_CRUISE_SYNC] src={src}+lead_close_cancel uom={speed_units} "
+        f"tgt={target_u:.1f} cur={current_u:.1f} est=0.0 "
+        f"btn={int(CruiseButtons.CANCEL)} reason=cancel[lead_close]"
+      )
+      self._rate_log(msg)
+      return LongDecision(int(CruiseButtons.CANCEL), msg)
 
     if stock_cruise_enabled and self._lead_approach_cancel_needed(
       now_ms=int(now),
