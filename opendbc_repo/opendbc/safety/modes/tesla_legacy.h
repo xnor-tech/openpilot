@@ -154,6 +154,14 @@ static void tesla_legacy_scrub_status_warnings(CANPacket_t *msg, uint8_t autopil
 }
 
 
+static void tesla_legacy_clear_warning_matrix(CANPacket_t *msg) {
+  for (int i = 0; i < GET_LEN(msg); i++) {
+    msg->data[i] = 0U;
+  }
+  tesla_legacy_set_last_byte_checksum(msg);
+}
+
+
 
 // --- RX hook ---
 static void tesla_legacy_rx_hook(const CANPacket_t *msg) {
@@ -450,17 +458,8 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
 
   // bus0 -> bus2: block IC/HUD frames only while OP owns the HUD/status path.
   if (bus_num == 0) {
-    const bool op_hud_owner = tesla_legacy_op_autopilot_disabled &&
-                              !tesla_legacy_autopilot_enabled &&
-                              !tesla_legacy_eac_enabled &&
-                              !tesla_legacy_autopark_enabled;
-    const bool op_hud_active = op_hud_owner && (controls_allowed || tesla_legacy_hide_errors_armed);
-
-    // Do not block these during startup/ready. Blocking them before engagement can make the IC flash AP/AEB unavailable.
-    if (op_hud_active && ((addr == 0x399) || (addr == 0x389) || (addr == 0x309) ||
-                          (addr == 0x329) || (addr == 0x349) || (addr == 0x369))) {
-      return true;
-    }
+    // Do not block stock HUD/status traffic when OP is not actively controlling.
+    // Letting stock frames recover cleanly prevents AP/AEB unavailable from latching across OP restarts.
 
     if (addr == 0x370) {
       const uint8_t b6 = to_fwd->data[6];
@@ -474,7 +473,8 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
     return false;
   }
 
-  // bus2 -> bus0: mutate forwarded HUD status only once OP is actually controlling.
+  // bus2 -> bus0: mutate HUD/AP status only while OP is actively controlling.
+  // Outside controls_allowed, pass the stock status stream through unchanged so AP/AEB state can recover on standby/reboot.
   if (bus_num == 2) {
     const bool op_hud_owner = tesla_legacy_op_autopilot_disabled &&
                               !tesla_legacy_autopilot_enabled &&
@@ -485,28 +485,14 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
         tesla_legacy_scrub_status2_warnings(to_fwd);
       } else if (addr == 0x399) {
         tesla_legacy_scrub_status_warnings(to_fwd, 0x05U);
+      } else if ((addr == 0x309) || (addr == 0x329) || (addr == 0x349) || (addr == 0x369)) {
+        tesla_legacy_clear_warning_matrix(to_fwd);
       } else {
       }
     }
 
-    // Just after disengage: keep the existing warning-hide behavior.
-    if (tesla_legacy_hide_errors_armed && !controls_allowed && !tesla_legacy_autopilot_enabled) {
-      const uint32_t dt = get_ts_elapsed(microsecond_timer_get(), tesla_legacy_time_op_disengaged);
-      if (dt <= TESLA_LEGACY_TIME_TO_HIDE_ERRORS_US) {
-        if (addr == 0x389) {
-          tesla_legacy_scrub_status2_warnings(to_fwd);
-        } else if (addr == 0x399) {
-          tesla_legacy_scrub_status_warnings(to_fwd, 0x02U);
-        } else if ((addr == 0x329) || (addr == 0x349) || (addr == 0x369)) {
-          for (int i = 0; i < GET_LEN(to_fwd); i++) {
-            to_fwd->data[i] = 0U;
-          }
-          tesla_legacy_set_last_byte_checksum(to_fwd);
-        } else {
-        }
-      } else {
-        tesla_legacy_hide_errors_armed = false;
-      }
+    if (!controls_allowed) {
+      tesla_legacy_hide_errors_armed = false;
     }
     return false;
   }
