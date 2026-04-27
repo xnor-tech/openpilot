@@ -135,6 +135,13 @@ class LongController:
   _MAPD_LOW_SPEED_PLANNER_HINT_DROP_MS = 0.4 * CV.MPH_TO_MS
   _MAPD_LOW_SPEED_STEER_HINT_DEG = 0.35
   _SHARP_CURVE_FAST_ENTRY_DROP_MS = 6.0 * CV.MPH_TO_MS
+  _LEAD_CONTEXT_CURVE_CAP_MIN_SPEED_MS = 18.0 * CV.MPH_TO_MS
+  _LEAD_CONTEXT_CURVE_CAP_MAX_SPEED_MS = 52.0 * CV.MPH_TO_MS
+  _LEAD_CONTEXT_CURVE_CAP_MIN_DROP_MS = 6.0 * CV.MPH_TO_MS
+  _LEAD_CONTEXT_CURVE_CAP_EGO_DROP_MS = 2.0 * CV.MPH_TO_MS
+  _LEAD_CONTEXT_CURVE_CAP_PERSIST_MS = 420
+  _LEAD_CONTEXT_CURVE_CAP_PREVIEW_DROP_MS = 9.0 * CV.MPH_TO_MS
+  _LEAD_CONTEXT_CURVE_CAP_TARGET_OFFSET_MS = 1.0 * CV.MPH_TO_MS
   _LP_QUEUE_FALLBACK_MAX_SPEED_MS = 45.0 * CV.MPH_TO_MS
   _LP_QUEUE_FALLBACK_DROP_MS = 1.0 * CV.MPH_TO_MS
   _LP_QUEUE_FALLBACK_EGO_MARGIN_MS = 0.5 * CV.MPH_TO_MS
@@ -248,6 +255,7 @@ class LongController:
     self._lead_curve_hold_vrel: float = 0.0
     self._lead_curve_hold_yrel: float = 0.0
     self._lead_curve_hold_active: bool = False
+    self._lead_context_curve_cap_candidate_since_ms: int = 0
     self._curve_recent_clear_until_ms: int = 0
     self._curve_limit_guard_candidate_since_ms: int = 0
     self._curve_limit_guard_release_candidate_since_ms: int = 0
@@ -1397,6 +1405,99 @@ class LongController:
     )
 
 
+
+  def _lead_context_mapd_curve_cap_ms(
+    self,
+    *,
+    now_ms: int,
+    now_ns: int,
+    desired_ms: float,
+    reference_ms: float,
+    v_ego_ms: float,
+  ) -> tuple[Optional[float], str]:
+    """Return a curve cap when lead context would otherwise mask a roundabout curve."""
+    if float(v_ego_ms) < float(self._LEAD_CONTEXT_CURVE_CAP_MIN_SPEED_MS):
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+    if float(v_ego_ms) > float(self._LEAD_CONTEXT_CURVE_CAP_MAX_SPEED_MS):
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+
+    in_lead_context = bool(self._lead_present) or bool(self._lp_has_lead) or int(now_ms) <= int(self._lead_recently_cleared_until_ms)
+    if not in_lead_context:
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+
+    if int(self._mapd_last_ns) <= 0 or (int(now_ns) - int(self._mapd_last_ns)) >= int(self._MAPD_FRESH_NS):
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+
+    raw_map_ms: Optional[float] = None
+    if self._mapd_map_curve_ms is not None:
+      raw = float(self._mapd_map_curve_ms)
+      if math.isfinite(raw) and raw > 0.1:
+        raw_map_ms = raw
+
+    raw_vision_ms: Optional[float] = None
+    if self._mapd_vision_curve_ms is not None:
+      raw = float(self._mapd_vision_curve_ms)
+      if math.isfinite(raw) and raw > 0.1:
+        raw_vision_ms = raw
+
+    if raw_map_ms is None and raw_vision_ms is None:
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+
+    raw_candidates = [v for v in (raw_map_ms, raw_vision_ms) if v is not None]
+    raw_low_ms = float(min(raw_candidates))
+    map_owned_low = raw_map_ms is not None and raw_map_ms <= (raw_low_ms + 0.05)
+    if not map_owned_low:
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+
+    reference_ms = float(reference_ms)
+    desired_ms = float(desired_ms)
+    v_ego_ms = float(v_ego_ms)
+
+    if raw_low_ms >= (reference_ms - float(self._LEAD_CONTEXT_CURVE_CAP_MIN_DROP_MS)):
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+    if raw_low_ms >= (v_ego_ms - float(self._LEAD_CONTEXT_CURVE_CAP_EGO_DROP_MS)):
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+    if desired_ms <= (raw_low_ms + float(self._LEAD_CONTEXT_CURVE_CAP_TARGET_OFFSET_MS)):
+      self._lead_context_curve_cap_candidate_since_ms = 0
+      return None, ""
+
+    if int(self._lead_context_curve_cap_candidate_since_ms) == 0:
+      self._lead_context_curve_cap_candidate_since_ms = int(now_ms)
+      return None, ""
+
+    elapsed_ms = int(now_ms) - int(self._lead_context_curve_cap_candidate_since_ms)
+    if elapsed_ms < int(self._LEAD_CONTEXT_CURVE_CAP_PERSIST_MS):
+      return None, ""
+
+    preview_cap_ms = max(
+      float(self.MIN_CRUISE_SPEED_MS),
+      min(
+        raw_low_ms + float(self._LEAD_CONTEXT_CURVE_CAP_TARGET_OFFSET_MS),
+        reference_ms - min(
+          float(self._LEAD_CONTEXT_CURVE_CAP_PREVIEW_DROP_MS),
+          max(0.0, reference_ms - raw_low_ms),
+        ),
+      ),
+    )
+
+    if raw_vision_ms is not None and raw_vision_ms <= (reference_ms - float(self._LEAD_CONTEXT_CURVE_CAP_MIN_DROP_MS)):
+      state = "mapd_lead_curve[map+vision]"
+    elif int(now_ms) <= int(self._lead_recently_cleared_until_ms):
+      state = "mapd_lead_curve[recent_clear]"
+    else:
+      state = "mapd_lead_curve[map_persist]"
+
+    return float(preview_cap_ms), state
+
+
   def _apply_lead_present_mapd_cap(
     self,
     *,
@@ -2101,6 +2202,17 @@ class LongController:
         if lead_mapd_capped:
           mapd_cap_src = "lead_comfort" if bool(self._mapd_comfort_bias_active) else "lead"
           src = f"{src}+mapd_cap[{mapd_cap_src}]"
+
+        lead_context_curve_cap_ms, lead_context_curve_state = self._lead_context_mapd_curve_cap_ms(
+          now_ms=int(now),
+          now_ns=int(now_ns),
+          desired_ms=float(desired_ms),
+          reference_ms=float(base_target_ms),
+          v_ego_ms=float(v_ego_ms),
+        )
+        if lead_context_curve_cap_ms is not None and float(lead_context_curve_cap_ms) < (float(desired_ms) - (0.25 * CV.MPH_TO_MS)):
+          desired_ms = max(float(self.MIN_CRUISE_SPEED_MS), min(float(desired_ms), float(lead_context_curve_cap_ms)))
+          src = f"{src}+{lead_context_curve_state}"
       elif self._lead_present and (self._lead_drel < 80.0) and (self._lead_vrel < -0.5):
         lead_speed_ms = max(0.0, float(v_ego_ms) + float(self._lead_vrel))
         desired_ms = min(float(base_target_ms), max(float(self.MIN_CRUISE_SPEED_MS), float(lead_speed_ms)))
