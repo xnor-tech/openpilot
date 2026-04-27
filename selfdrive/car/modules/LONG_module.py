@@ -68,6 +68,9 @@ class LongController:
   _CURVE_HOLD_DROP_RATE_MS_PER_S = 1.8
   _CURVE_HOLD_HARD_DROP_EXTRA_MS = 5.0 * CV.MPH_TO_MS
   _CURVE_ENTRY_PREVIEW_DROP_MS = 2.0 * CV.MPH_TO_MS
+  _CURVE_PRE_ENTRY_MIN_DROP_MS = 4.0 * CV.MPH_TO_MS
+  _CURVE_PRE_ENTRY_PREVIEW_DROP_MS = 5.0 * CV.MPH_TO_MS
+  _CURVE_PRE_ENTRY_MIN_RATIO = 0.45
   _CURVE_MIN_CRUISE_HOLD_MARGIN_MS = 5.0 * CV.MPH_TO_MS
   _CURVE_MAPD_MIN_HOLD_MARGIN_MS = 0.5 * CV.MPH_TO_MS
   _CURVE_HARD_ENTRY_EXTRA_MS = 3.0 * CV.MPH_TO_MS
@@ -892,23 +895,33 @@ class LongController:
       return reference_ms, "curve_clear"
 
     if not self._curve_hold_active:
+      strong_pre_entry = delta_ms >= float(self._CURVE_PRE_ENTRY_MIN_DROP_MS)
+      preview_limit_ms = (
+        float(self._CURVE_PRE_ENTRY_PREVIEW_DROP_MS)
+        if strong_pre_entry
+        else float(self._CURVE_ENTRY_PREVIEW_DROP_MS)
+      )
+
       if delta_ms >= hard_entry_threshold_ms:
         self._curve_hold_active = True
         self._curve_hold_target_ms = max(
           float(raw_target_ms),
-          float(reference_ms) - float(self._CURVE_ENTRY_PREVIEW_DROP_MS),
+          float(reference_ms) - min(float(preview_limit_ms), float(delta_ms)),
         )
         self._curve_hold_last_update_ms = int(now_ms)
         self._curve_entry_candidate_since_ms = 0
         self._curve_exit_candidate_since_ms = 0
-        return float(self._curve_hold_target_ms), "curve_hold(hard_entry)"
+        state = "curve_pre_entry(hard)" if strong_pre_entry else "curve_hold(hard_entry)"
+        return float(self._curve_hold_target_ms), state
 
       if delta_ms >= entry_threshold_ms:
         if int(self._curve_entry_candidate_since_ms) == 0:
           self._curve_entry_candidate_since_ms = int(now_ms)
         elapsed_ms = max(0, int(now_ms) - int(self._curve_entry_candidate_since_ms))
         preview_ratio = min(1.0, float(elapsed_ms) / max(1.0, float(self._CURVE_ENTRY_PERSIST_MS)))
-        preview_drop_ms = min(float(self._CURVE_ENTRY_PREVIEW_DROP_MS), float(delta_ms)) * preview_ratio
+        if strong_pre_entry:
+          preview_ratio = max(float(self._CURVE_PRE_ENTRY_MIN_RATIO), preview_ratio)
+        preview_drop_ms = min(float(preview_limit_ms), float(delta_ms)) * preview_ratio
         preview_target_ms = max(float(raw_target_ms), float(reference_ms) - preview_drop_ms)
         if elapsed_ms >= int(self._CURVE_ENTRY_PERSIST_MS):
           self._curve_hold_active = True
@@ -916,8 +929,10 @@ class LongController:
           self._curve_hold_last_update_ms = int(now_ms)
           self._curve_entry_candidate_since_ms = 0
           self._curve_exit_candidate_since_ms = 0
-          return float(self._curve_hold_target_ms), "curve_hold(entry)"
-        return float(preview_target_ms), "curve_gate(wait)"
+          state = "curve_pre_entry(entry)" if strong_pre_entry else "curve_hold(entry)"
+          return float(self._curve_hold_target_ms), state
+        state = "curve_pre_entry(wait)" if strong_pre_entry else "curve_gate(wait)"
+        return float(preview_target_ms), state
       self._curve_entry_candidate_since_ms = 0
       return reference_ms, "curve_gate(clear)"
 
