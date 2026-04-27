@@ -430,9 +430,17 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
     return true;
   }
 
-  // External panda: only passthrough stock AEB long control (bus2 -> car)
+  // External panda:
+  // - While OP is not actively controlling, pass stock DAS_longControl through unchanged.
+  //   The IC expects this stock heartbeat during startup/standby; blocking it can latch
+  //   transient "AEB unavailable" warnings before OP has taken ownership.
+  // - While OP is actively controlling, keep the previous Unity-style behavior: block
+  //   stock longControl except real stock AEB events.
   if (tesla_legacy_external_panda) {
     if ((bus_num == 2) && (addr == 0x2BF)) {
+      if (!controls_allowed) {
+        return false;
+      }
       return !tesla_legacy_stock_aeb;
     }
     return true;
