@@ -139,8 +139,8 @@ class LongController:
   _LEAD_CONTEXT_CURVE_CAP_MAX_SPEED_MS = 52.0 * CV.MPH_TO_MS
   _LEAD_CONTEXT_CURVE_CAP_MIN_DROP_MS = 6.0 * CV.MPH_TO_MS
   _LEAD_CONTEXT_CURVE_CAP_EGO_DROP_MS = 2.0 * CV.MPH_TO_MS
-  _LEAD_CONTEXT_CURVE_CAP_PERSIST_MS = 420
-  _LEAD_CONTEXT_CURVE_CAP_PREVIEW_DROP_MS = 9.0 * CV.MPH_TO_MS
+  _LEAD_CONTEXT_CURVE_CAP_PERSIST_MS = 220
+  _LEAD_CONTEXT_CURVE_CAP_PREVIEW_DROP_MS = 12.0 * CV.MPH_TO_MS
   _LEAD_CONTEXT_CURVE_CAP_TARGET_OFFSET_MS = 1.0 * CV.MPH_TO_MS
   _LP_QUEUE_FALLBACK_MAX_SPEED_MS = 45.0 * CV.MPH_TO_MS
   _LP_QUEUE_FALLBACK_DROP_MS = 1.0 * CV.MPH_TO_MS
@@ -152,6 +152,20 @@ class LongController:
   _WEAK_LEAD_OWNER_VREL_MS = -0.35
   _WEAK_LEAD_OWNER_ATARGET_MS2 = -0.35
   _WEAK_LEAD_OWNER_TIME_GAP_S = 2.2
+
+  _CURVE_FORCE_ENTRY_MIN_SPEED_MS = 18.0 * CV.MPH_TO_MS
+  _CURVE_FORCE_ENTRY_MIN_DROP_MS = 4.0 * CV.MPH_TO_MS
+  _CURVE_FORCE_ENTRY_EGO_DROP_MS = 2.0 * CV.MPH_TO_MS
+  _CURVE_FORCE_ENTRY_PERSIST_MS = 260
+  _CURVE_FORCE_ENTRY_STEER_PERSIST_MS = 80
+  _CURVE_FORCE_ENTRY_PREVIEW_DROP_MS = 8.0 * CV.MPH_TO_MS
+  _CURVE_FORCE_ENTRY_TARGET_OFFSET_MS = 1.0 * CV.MPH_TO_MS
+  _CURVE_ACCEL_BLOCK_STEER_DEG = 3.0
+  _CURVE_ACCEL_BLOCK_STEER_RATE_DEG = 7.0
+  _CURVE_ACCEL_BLOCK_MIN_DROP_MS = 2.0 * CV.MPH_TO_MS
+  _CURVE_ACCEL_BLOCK_EGO_MARGIN_MS = 0.5 * CV.MPH_TO_MS
+  _CURVE_STEER_LIMIT_HOLD_MS = 900
+  _CURVE_STEER_LIMIT_HOLD_DROP_MS = 4.0 * CV.MPH_TO_MS
 
   _LEAD_STUCK_CANCEL_MIN_DROP_MS = 4.0 * CV.MPH_TO_MS
   _LEAD_STUCK_CANCEL_PLANNER_MARGIN_MS = 2.0 * CV.MPH_TO_MS
@@ -260,6 +274,8 @@ class LongController:
     self._curve_limit_guard_candidate_since_ms: int = 0
     self._curve_limit_guard_release_candidate_since_ms: int = 0
     self._curve_limit_guard_active: bool = False
+    self._curve_force_entry_candidate_since_ms: int = 0
+    self._curve_steer_limit_hold_until_ms: int = 0
     self._controls_state_last_ns: int = 0
     self._lat_limit_saturated: bool = False
     self._lat_limit_severity: float = 0.0
@@ -767,6 +783,8 @@ class LongController:
     self._curve_mapd_release_candidate_since_ms = 0
     self._curve_planner_release_candidate_since_ms = 0
     self._mapd_entry_candidate_since_ms = 0
+    self._curve_force_entry_candidate_since_ms = 0
+    self._curve_steer_limit_hold_until_ms = 0
 
   def _reset_lead_hold(self) -> None:
     self._lead_hold_until_ms = 0
@@ -1496,6 +1514,149 @@ class LongController:
       state = "mapd_lead_curve[map_persist]"
 
     return float(preview_cap_ms), state
+
+
+  def _steer_busy_for_curve(self, *, current_angle_deg: float, steering_rate_deg: float) -> bool:
+    return bool(
+      abs(float(current_angle_deg)) >= float(self._CURVE_ACCEL_BLOCK_STEER_DEG)
+      or abs(float(steering_rate_deg)) >= float(self._CURVE_ACCEL_BLOCK_STEER_RATE_DEG)
+      or bool(self._lat_limit_saturated)
+    )
+
+  def _curve_force_entry_cap_ms(
+    self,
+    *,
+    now_ms: int,
+    now_ns: int,
+    desired_ms: float,
+    reference_ms: float,
+    v_ego_ms: float,
+    current_angle_deg: float,
+    steering_rate_deg: float,
+    lead_context: bool,
+  ) -> tuple[Optional[float], str]:
+    """Force a curve cap when speed/lead ownership would otherwise mask entry."""
+    if float(v_ego_ms) < float(self._CURVE_FORCE_ENTRY_MIN_SPEED_MS):
+      self._curve_force_entry_candidate_since_ms = 0
+      return None, ""
+
+    if int(self._mapd_last_ns) <= 0 or (int(now_ns) - int(self._mapd_last_ns)) >= int(self._MAPD_FRESH_NS):
+      self._curve_force_entry_candidate_since_ms = 0
+      return None, ""
+
+    raw_map_ms, raw_vision_ms = self._curve_specific_mapd_sources(now_ns=int(now_ns))
+    raw_candidates = [float(v) for v in (raw_map_ms, raw_vision_ms) if v is not None and math.isfinite(float(v)) and float(v) > 0.1]
+    if not raw_candidates:
+      self._curve_force_entry_candidate_since_ms = 0
+      return None, ""
+
+    raw_low_ms = float(min(raw_candidates))
+    map_owned_low = bool(raw_map_ms is not None and float(raw_map_ms) <= (raw_low_ms + 0.05))
+    vision_supports = bool(raw_vision_ms is not None and float(raw_vision_ms) <= (float(reference_ms) - float(self._CURVE_FORCE_ENTRY_MIN_DROP_MS)))
+
+    curve_specific_ms = self._curve_specific_mapd_target_ms(
+      now_ns=int(now_ns),
+      reference_ms=float(reference_ms),
+      planner_near_ms=None,
+      current_angle_deg=float(current_angle_deg),
+      planner_curve_active=False,
+    )
+    if curve_specific_ms is None:
+      curve_specific_ms = raw_low_ms
+
+    # For roundabouts, the map source can be right while vision still sees a straight road.
+    if bool(map_owned_low) and (bool(lead_context) or self._steer_busy_for_curve(current_angle_deg=current_angle_deg, steering_rate_deg=steering_rate_deg)):
+      curve_specific_ms = min(float(curve_specific_ms), float(raw_low_ms) + float(self._CURVE_FORCE_ENTRY_TARGET_OFFSET_MS))
+
+    reference_ms = float(reference_ms)
+    desired_ms = float(desired_ms)
+    v_ego_ms = float(v_ego_ms)
+    curve_specific_ms = float(curve_specific_ms)
+
+    meaningful_drop = curve_specific_ms <= (reference_ms - float(self._CURVE_FORCE_ENTRY_MIN_DROP_MS))
+    ego_too_fast = curve_specific_ms <= (v_ego_ms - float(self._CURVE_FORCE_ENTRY_EGO_DROP_MS))
+    if not (meaningful_drop and ego_too_fast):
+      self._curve_force_entry_candidate_since_ms = 0
+      return None, ""
+
+    steer_busy = self._steer_busy_for_curve(current_angle_deg=current_angle_deg, steering_rate_deg=steering_rate_deg)
+    sharp_map_entry = bool(map_owned_low and raw_low_ms <= (reference_ms - float(self._SHARP_CURVE_FAST_ENTRY_DROP_MS)))
+    allowed_context = bool(lead_context or steer_busy or vision_supports or sharp_map_entry)
+    if not allowed_context:
+      self._curve_force_entry_candidate_since_ms = 0
+      return None, ""
+
+    persist_ms = int(self._CURVE_FORCE_ENTRY_PERSIST_MS)
+    if steer_busy or bool(self._lat_limit_saturated):
+      persist_ms = min(persist_ms, int(self._CURVE_FORCE_ENTRY_STEER_PERSIST_MS))
+    if sharp_map_entry and bool(lead_context):
+      persist_ms = min(persist_ms, 160)
+
+    if int(self._curve_force_entry_candidate_since_ms) == 0:
+      self._curve_force_entry_candidate_since_ms = int(now_ms)
+      return None, ""
+
+    elapsed_ms = int(now_ms) - int(self._curve_force_entry_candidate_since_ms)
+    if elapsed_ms < int(persist_ms):
+      return None, ""
+
+    cap_ms = max(
+      float(self.MIN_CRUISE_SPEED_MS),
+      min(
+        float(curve_specific_ms) + float(self._CURVE_FORCE_ENTRY_TARGET_OFFSET_MS),
+        reference_ms - min(float(self._CURVE_FORCE_ENTRY_PREVIEW_DROP_MS), max(0.0, reference_ms - curve_specific_ms)),
+      ),
+    )
+
+    state = "curve_pre_entry[brake_distance]"
+    if bool(lead_context):
+      state = "mapd_lead_curve[force_entry]"
+    if steer_busy:
+      state = f"{state}+curve_accel_block[steer_busy]"
+
+    if bool(self._lat_limit_saturated) or int(now_ms) <= int(self._curve_steer_limit_hold_until_ms):
+      self._curve_steer_limit_hold_until_ms = int(now_ms) + int(self._CURVE_STEER_LIMIT_HOLD_MS)
+      cap_ms = max(float(self.MIN_CRUISE_SPEED_MS), float(cap_ms) - float(self._CURVE_STEER_LIMIT_HOLD_DROP_MS))
+      state = f"{state}+curve_steer_limit_hold"
+
+    if float(cap_ms) >= (desired_ms - (0.25 * CV.MPH_TO_MS)) and not steer_busy:
+      return None, ""
+
+    return float(cap_ms), state
+
+  def _curve_accel_block_target(
+    self,
+    *,
+    now_ns: int,
+    desired_ms: float,
+    reference_ms: float,
+    current_set_ms: float,
+    v_ego_ms: float,
+    current_angle_deg: float,
+    steering_rate_deg: float,
+  ) -> tuple[float, bool]:
+    if not self._steer_busy_for_curve(current_angle_deg=current_angle_deg, steering_rate_deg=steering_rate_deg):
+      return float(desired_ms), False
+
+    curve_specific_ms = self._curve_specific_mapd_target_ms(
+      now_ns=int(now_ns),
+      reference_ms=float(reference_ms),
+      planner_near_ms=None,
+      current_angle_deg=float(current_angle_deg),
+      planner_curve_active=False,
+    )
+    if curve_specific_ms is None:
+      return float(desired_ms), False
+
+    if float(curve_specific_ms) > (float(reference_ms) - float(self._CURVE_ACCEL_BLOCK_MIN_DROP_MS)):
+      return float(desired_ms), False
+    if float(curve_specific_ms) > (float(v_ego_ms) - float(self._CURVE_ACCEL_BLOCK_EGO_MARGIN_MS)):
+      return float(desired_ms), False
+
+    accel_block_ms = max(0.0, max(float(current_set_ms), float(v_ego_ms)) - (0.25 * CV.MPH_TO_MS))
+    if float(desired_ms) <= (float(accel_block_ms) + 0.01):
+      return float(desired_ms), False
+    return float(accel_block_ms), True
 
 
   def _apply_lead_present_mapd_cap(
@@ -2442,6 +2603,36 @@ class LongController:
         lead_speed_ms = max(0.0, float(v_ego_ms) + float(self._lead_vrel))
         desired_ms = min(float(desired_ms), max(float(self.MIN_CRUISE_SPEED_MS), float(lead_speed_ms)))
         src = f"{src}+stale_lead"
+
+    current_angle_deg = abs(float(getattr(cs_out, "steeringAngleDeg", 0.0) or 0.0))
+    steering_rate_deg = abs(float(getattr(cs_out, "steeringRateDeg", 0.0) or 0.0))
+    curve_lead_context = bool(self._lead_present) or bool(self._lp_has_lead) or int(now) <= int(self._lead_recently_cleared_until_ms)
+    curve_reference_ms = float(speed_limit_target_ms if (set_speed_limit_active and speed_limit_target_ms is not None) else max(float(desired_ms), float(current_set_ms), float(v_ego_ms)))
+    curve_force_cap_ms, curve_force_state = self._curve_force_entry_cap_ms(
+      now_ms=int(now),
+      now_ns=int(now_ns),
+      desired_ms=float(desired_ms),
+      reference_ms=float(curve_reference_ms),
+      v_ego_ms=float(v_ego_ms),
+      current_angle_deg=float(current_angle_deg),
+      steering_rate_deg=float(steering_rate_deg),
+      lead_context=bool(curve_lead_context),
+    )
+    if curve_force_cap_ms is not None and float(curve_force_cap_ms) < (float(desired_ms) - (0.10 * CV.MPH_TO_MS)):
+      desired_ms = min(float(desired_ms), float(curve_force_cap_ms))
+      src = f"{src}+{curve_force_state}"
+
+    desired_ms, curve_accel_blocked = self._curve_accel_block_target(
+      now_ns=int(now_ns),
+      desired_ms=float(desired_ms),
+      reference_ms=float(curve_reference_ms),
+      current_set_ms=float(current_set_ms),
+      v_ego_ms=float(v_ego_ms),
+      current_angle_deg=float(current_angle_deg),
+      steering_rate_deg=float(steering_rate_deg),
+    )
+    if curve_accel_blocked and "curve_accel_block[steer_busy]" not in src:
+      src = f"{src}+curve_accel_block[steer_busy]"
 
     desired_ms, lead_low_speed_blocked = self._low_speed_lead_block_target(
       now_ms=int(now),
