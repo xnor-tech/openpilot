@@ -425,8 +425,13 @@ static bool tesla_legacy_fwd_msg_hook(int bus_num, CANPacket_t *to_fwd) {
     return true;
   }
 
-  // Prevent OP actuation echoes back to AP side
-  if ((bus_num == 0) && ((addr == 0x488) || (addr == 0x27D) || (addr == 0x2BF))) {
+  // Prevent OP actuation echoes back to AP side.
+  // Keep stock DAS_longControl (0x2BF) flowing before OP is actively controlling;
+  // blocking that startup heartbeat can trigger transient AEB-unavailable on the IC.
+  if ((bus_num == 0) && ((addr == 0x488) || (addr == 0x27D))) {
+    return true;
+  }
+  if ((bus_num == 0) && (addr == 0x2BF) && controls_allowed) {
     return true;
   }
 
