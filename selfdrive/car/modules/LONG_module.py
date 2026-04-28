@@ -5,6 +5,8 @@ Human-tuned stock cruise syncing for XNOR.
 This keeps the stable owner split and the no-lead curve behavior, while
 making lead-follow recovery smoother and less sticky:
 
+v56 adds forced lead-approach cancellation and stale straight-road mapd release.
+
 - lead-following still stays on the planner tail while a lead is constraining
 - opening / non-constraining leads stop capping the target too aggressively
 - small follow-speed oscillations no longer latch extra far-queue protection
@@ -167,6 +169,13 @@ class LongController:
   _CURVE_STEER_LIMIT_HOLD_MS = 900
   _CURVE_STEER_LIMIT_HOLD_DROP_MS = 4.0 * CV.MPH_TO_MS
 
+  _MAPD_STRAIGHT_STALE_DISAGREE_MS = 8.0 * CV.MPH_TO_MS
+  _MAPD_STRAIGHT_STALE_VISION_CLEAR_MS = 6.0 * CV.MPH_TO_MS
+  _MAPD_STRAIGHT_STALE_PLANNER_CLEAR_MS = 2.0 * CV.MPH_TO_MS
+  _MAPD_STRAIGHT_STALE_STEER_DEG = 1.2
+  _MAPD_STRAIGHT_STALE_SET_DROP_MS = 8.0 * CV.MPH_TO_MS
+  _MAPD_STRAIGHT_STALE_BLOCK_MS = 5000
+
   _LEAD_STUCK_CANCEL_MIN_DROP_MS = 4.0 * CV.MPH_TO_MS
   _LEAD_STUCK_CANCEL_PLANNER_MARGIN_MS = 2.0 * CV.MPH_TO_MS
   _LEAD_STUCK_CANCEL_SET_DROP_EPS_MS = 0.4 * CV.MPH_TO_MS
@@ -194,6 +203,13 @@ class LongController:
   _LEAD_APPROACH_CANCEL_MIN_ACTIVE_MS = 650
   _LEAD_APPROACH_CANCEL_NO_DROP_MS = 500
   _LEAD_APPROACH_CANCEL_REPEAT_MS = 1800
+  _LEAD_APPROACH_FORCE_CANCEL_MIN_DROP_MS = 8.0 * CV.MPH_TO_MS
+  _LEAD_APPROACH_FORCE_CANCEL_MAX_GAP_M = 72.0
+  _LEAD_APPROACH_FORCE_CANCEL_TIME_GAP_S = 2.50
+  _LEAD_APPROACH_FORCE_CANCEL_CLOSING_MS = -0.10
+  _LEAD_APPROACH_FORCE_CANCEL_ATARGET_MS2 = -0.45
+  _LEAD_APPROACH_FORCE_CANCEL_ARM_MS = 160
+  _LEAD_APPROACH_FORCE_CANCEL_REPEAT_MS = 1600
 
   _SECONDARY_LEAD_FALLBACK_MAX_YREL_M = 1.8
   _SECONDARY_LEAD_FALLBACK_MAX_GAP_M = 70.0
@@ -276,6 +292,7 @@ class LongController:
     self._curve_limit_guard_active: bool = False
     self._curve_force_entry_candidate_since_ms: int = 0
     self._curve_steer_limit_hold_until_ms: int = 0
+    self._mapd_stale_block_until_ms: int = 0
     self._controls_state_last_ns: int = 0
     self._lat_limit_saturated: bool = False
     self._lat_limit_severity: float = 0.0
@@ -289,6 +306,8 @@ class LongController:
     self._lead_approach_last_drop_ms: int = 0
     self._lead_approach_last_set_ms: float = 0.0
     self._lead_approach_last_cancel_ms: int = 0
+    self._lead_approach_force_candidate_since_ms: int = 0
+    self._lead_approach_force_last_cancel_ms: int = 0
     self._lead_close_cancel_candidate_since_ms: int = 0
     self._lead_close_cancel_last_cancel_ms: int = 0
 
@@ -301,6 +320,7 @@ class LongController:
     self._lead_approach_candidate_since_ms = 0
     self._lead_approach_last_drop_ms = 0
     self._lead_approach_last_set_ms = 0.0
+    self._lead_approach_force_candidate_since_ms = 0
 
   def _reset_lead_close_cancel(self) -> None:
     self._lead_close_cancel_candidate_since_ms = 0
@@ -496,6 +516,40 @@ class LongController:
     return _clean(self._mapd_map_curve_ms), _clean(self._mapd_vision_curve_ms)
 
 
+  def _mapd_straight_false_positive(
+    self,
+    *,
+    now_ns: int,
+    reference_ms: float,
+    planner_near_ms: float,
+    current_angle_deg: float,
+  ) -> bool:
+    """Reject map-only curve caps that look stale on a confirmed straight."""
+    raw_map_ms, raw_vision_ms = self._curve_specific_mapd_sources(now_ns=int(now_ns))
+    if raw_map_ms is None or raw_vision_ms is None:
+      return False
+
+    reference_ms = float(reference_ms)
+    planner_near_ms = float(planner_near_ms)
+    current_angle_deg = abs(float(current_angle_deg))
+    raw_map_ms = float(raw_map_ms)
+    raw_vision_ms = float(raw_vision_ms)
+
+    if raw_map_ms >= (reference_ms - float(self._MAPD_STRAIGHT_STALE_PLANNER_CLEAR_MS)):
+      return False
+    if (raw_vision_ms - raw_map_ms) < float(self._MAPD_STRAIGHT_STALE_DISAGREE_MS):
+      return False
+    if raw_vision_ms < (reference_ms - float(self._MAPD_STRAIGHT_STALE_VISION_CLEAR_MS)):
+      return False
+    if planner_near_ms > 0.1 and planner_near_ms < (reference_ms - float(self._MAPD_STRAIGHT_STALE_PLANNER_CLEAR_MS)):
+      return False
+    if current_angle_deg > float(self._MAPD_STRAIGHT_STALE_STEER_DEG):
+      return False
+    if bool(self._lat_limit_saturated):
+      return False
+    return True
+
+
   def _mapd_curve_active_target_ms(
     self,
     *,
@@ -546,6 +600,15 @@ class LongController:
     planner_near_ms = float(planner_near_ms)
     v_ego_ms = float(v_ego_ms)
     current_angle_deg = abs(float(current_angle_deg))
+
+    if int(now_ms) <= int(self._mapd_stale_block_until_ms) and self._mapd_straight_false_positive(
+      now_ns=int(now_ns),
+      reference_ms=float(reference_ms),
+      planner_near_ms=float(planner_near_ms),
+      current_angle_deg=float(current_angle_deg),
+    ):
+      self._mapd_entry_candidate_since_ms = 0
+      return None
 
     release_margin_ms = float(self._CURVE_RELEASE_NEAR_TARGET_MARGIN_MS)
     entry_threshold_ms = float(self._curve_entry_threshold_ms(reference_ms))
@@ -1880,6 +1943,95 @@ class LongController:
     return True
 
 
+  def _lead_approach_force_cancel_needed(
+    self,
+    *,
+    now_ms: int,
+    desired_ms: float,
+    current_set_ms: float,
+    v_ego_ms: float,
+    planner_last_ms: float,
+    planner_near_ms: float,
+    brake_pressed: bool,
+  ) -> bool:
+    if bool(brake_pressed):
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+    if (not self._lead_present) or float(self._lead_drel) <= 0.0:
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+    if abs(float(self._lead_yrel)) >= float(self._LEAD_OFFLANE_YREL_M):
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+    if float(v_ego_ms) < float(self._LEAD_APPROACH_CANCEL_MIN_SPEED_MS):
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+    if float(v_ego_ms) > float(self._LEAD_APPROACH_CANCEL_MAX_SPEED_MS):
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+    if float(current_set_ms) <= 0.1 or float(desired_ms) <= 0.1:
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+
+    set_drop_needed_ms = float(current_set_ms) - float(desired_ms)
+    if set_drop_needed_ms < float(self._LEAD_APPROACH_FORCE_CANCEL_MIN_DROP_MS):
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+
+    planner_floor_ms = min(float(planner_last_ms), float(planner_near_ms))
+    planner_supported = bool(
+      planner_floor_ms > 0.1
+      and planner_floor_ms < (float(current_set_ms) - float(self._LEAD_APPROACH_CANCEL_PLANNER_MARGIN_MS))
+      and (
+        planner_floor_ms < (float(v_ego_ms) - (0.25 * CV.MPH_TO_MS))
+        or float(self._lp_a_target) <= float(self._LEAD_APPROACH_FORCE_CANCEL_ATARGET_MS2)
+        or "lead" in str(self._lp_source or "")
+      )
+    )
+    if not planner_supported:
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+
+    gap_limit_m = min(
+      float(self._LEAD_APPROACH_FORCE_CANCEL_MAX_GAP_M),
+      max(float(self._LEAD_APPROACH_CANCEL_MAX_GAP_M), float(v_ego_ms) * float(self._LEAD_APPROACH_FORCE_CANCEL_TIME_GAP_S)),
+    )
+    if float(self._lead_drel) > float(gap_limit_m):
+      self._lead_approach_force_candidate_since_ms = 0
+      return False
+
+    closing_or_decel = bool(
+      float(self._lead_vrel) <= float(self._LEAD_APPROACH_FORCE_CANCEL_CLOSING_MS)
+      or float(self._lp_a_target) <= float(self._LEAD_APPROACH_FORCE_CANCEL_ATARGET_MS2)
+      or "lead+atarget" in str(self._lp_source or "")
+    )
+    if not closing_or_decel:
+      if float(self._lead_vrel) >= float(self._LEAD_APPROACH_CANCEL_OPENING_RESET_MS) and float(self._lp_a_target) > float(self._LEAD_APPROACH_CANCEL_ATARGET_MS2):
+        self._lead_approach_force_candidate_since_ms = 0
+      return False
+
+    now = int(now_ms)
+    if (now - int(self._lead_approach_force_last_cancel_ms)) < int(self._LEAD_APPROACH_FORCE_CANCEL_REPEAT_MS):
+      return False
+
+    severe_drop = set_drop_needed_ms >= (float(self._LEAD_APPROACH_FORCE_CANCEL_MIN_DROP_MS) + (3.0 * CV.MPH_TO_MS))
+    if bool(severe_drop and closing_or_decel):
+      self._lead_approach_force_last_cancel_ms = now
+      self._lead_approach_force_candidate_since_ms = 0
+      return True
+
+    if int(self._lead_approach_force_candidate_since_ms) == 0:
+      self._lead_approach_force_candidate_since_ms = now
+      return False
+
+    if (now - int(self._lead_approach_force_candidate_since_ms)) >= int(self._LEAD_APPROACH_FORCE_CANCEL_ARM_MS):
+      self._lead_approach_force_last_cancel_ms = now
+      self._lead_approach_force_candidate_since_ms = 0
+      return True
+
+    return False
+
+
   def _lead_approach_cancel_needed(
     self,
     *,
@@ -2608,31 +2760,50 @@ class LongController:
     steering_rate_deg = abs(float(getattr(cs_out, "steeringRateDeg", 0.0) or 0.0))
     curve_lead_context = bool(self._lead_present) or bool(self._lp_has_lead) or int(now) <= int(self._lead_recently_cleared_until_ms)
     curve_reference_ms = float(speed_limit_target_ms if (set_speed_limit_active and speed_limit_target_ms is not None) else max(float(desired_ms), float(current_set_ms), float(v_ego_ms)))
-    curve_force_cap_ms, curve_force_state = self._curve_force_entry_cap_ms(
-      now_ms=int(now),
-      now_ns=int(now_ns),
-      desired_ms=float(desired_ms),
-      reference_ms=float(curve_reference_ms),
-      v_ego_ms=float(v_ego_ms),
-      current_angle_deg=float(current_angle_deg),
-      steering_rate_deg=float(steering_rate_deg),
-      lead_context=bool(curve_lead_context),
+    mapd_stale_release = bool(
+      (not bool(self._lead_present))
+      and (not bool(self._lp_has_lead))
+      and bool(self._curve_hold_active)
+      and float(current_set_ms) > 0.1
+      and float(current_set_ms) < (float(curve_reference_ms) - float(self._MAPD_STRAIGHT_STALE_SET_DROP_MS))
+      and self._mapd_straight_false_positive(
+        now_ns=int(now_ns),
+        reference_ms=float(curve_reference_ms),
+        planner_near_ms=float(planner_near_ms),
+        current_angle_deg=float(current_angle_deg),
+      )
     )
-    if curve_force_cap_ms is not None and float(curve_force_cap_ms) < (float(desired_ms) - (0.10 * CV.MPH_TO_MS)):
-      desired_ms = min(float(desired_ms), float(curve_force_cap_ms))
-      src = f"{src}+{curve_force_state}"
+    if mapd_stale_release:
+      self._reset_curve_hold()
+      self._mapd_stale_block_until_ms = int(now) + int(self._MAPD_STRAIGHT_STALE_BLOCK_MS)
+      desired_ms = float(curve_reference_ms)
+      src = f"{src}+mapd_stale_release"
+    else:
+      curve_force_cap_ms, curve_force_state = self._curve_force_entry_cap_ms(
+        now_ms=int(now),
+        now_ns=int(now_ns),
+        desired_ms=float(desired_ms),
+        reference_ms=float(curve_reference_ms),
+        v_ego_ms=float(v_ego_ms),
+        current_angle_deg=float(current_angle_deg),
+        steering_rate_deg=float(steering_rate_deg),
+        lead_context=bool(curve_lead_context),
+      )
+      if curve_force_cap_ms is not None and float(curve_force_cap_ms) < (float(desired_ms) - (0.10 * CV.MPH_TO_MS)):
+        desired_ms = min(float(desired_ms), float(curve_force_cap_ms))
+        src = f"{src}+{curve_force_state}"
 
-    desired_ms, curve_accel_blocked = self._curve_accel_block_target(
-      now_ns=int(now_ns),
-      desired_ms=float(desired_ms),
-      reference_ms=float(curve_reference_ms),
-      current_set_ms=float(current_set_ms),
-      v_ego_ms=float(v_ego_ms),
-      current_angle_deg=float(current_angle_deg),
-      steering_rate_deg=float(steering_rate_deg),
-    )
-    if curve_accel_blocked and "curve_accel_block[steer_busy]" not in src:
-      src = f"{src}+curve_accel_block[steer_busy]"
+      desired_ms, curve_accel_blocked = self._curve_accel_block_target(
+        now_ns=int(now_ns),
+        desired_ms=float(desired_ms),
+        reference_ms=float(curve_reference_ms),
+        current_set_ms=float(current_set_ms),
+        v_ego_ms=float(v_ego_ms),
+        current_angle_deg=float(current_angle_deg),
+        steering_rate_deg=float(steering_rate_deg),
+      )
+      if curve_accel_blocked and "curve_accel_block[steer_busy]" not in src:
+        src = f"{src}+curve_accel_block[steer_busy]"
 
     desired_ms, lead_low_speed_blocked = self._low_speed_lead_block_target(
       now_ms=int(now),
@@ -2659,6 +2830,26 @@ class LongController:
 
     stock_cruise_enabled = stock_state in ("ENABLED", "OVERRIDE", "STANDSTILL")
     brake_pressed = bool(getattr(cs_out, "brakePressed", False))
+
+    if stock_cruise_enabled and self._lead_approach_force_cancel_needed(
+      now_ms=int(now),
+      desired_ms=float(desired_ms),
+      current_set_ms=float(current_set_ms),
+      v_ego_ms=float(v_ego_ms),
+      planner_last_ms=float(planner_last_ms),
+      planner_near_ms=float(planner_near_ms),
+      brake_pressed=bool(brake_pressed),
+    ):
+      kph_to_u = CV.KPH_TO_MPH if speed_units == "MPH" else 1.0
+      target_u = float(desired_ms) * CV.MS_TO_KPH * kph_to_u
+      current_u = float(current_set_ms) * CV.MS_TO_KPH * kph_to_u
+      msg = (
+        f"[XNOR_CRUISE_SYNC] src={src}+lead_approach_force_cancel uom={speed_units} "
+        f"tgt={target_u:.1f} cur={current_u:.1f} est=0.0 "
+        f"btn={int(CruiseButtons.CANCEL)} reason=cancel[lead_approach_force]"
+      )
+      self._rate_log(msg)
+      return LongDecision(int(CruiseButtons.CANCEL), msg)
 
     if stock_cruise_enabled and self._lead_close_cancel_needed(
       now_ms=int(now),
