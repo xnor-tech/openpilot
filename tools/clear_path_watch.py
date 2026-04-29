@@ -125,6 +125,14 @@ def _car_state_summary(cs: Any) -> dict[str, Any]:
     "rightBlinker": _safe_bool(_maybe_attr(cs, "rightBlinker", False)),
     "speedLimit": _safe_float(_maybe_attr(cs, "speedLimit", 0.0)),
     "speedLimitOffset": _safe_float(_maybe_attr(cs, "speedLimitOffset", 0.0)),
+    "cruiseButtons": _safe_int(_maybe_attr(cs, "cruiseButtons", 0), 0),
+    "cruiseButtonsCounter": _safe_int(_maybe_attr(cs, "cruiseButtonsCounter", 0), 0),
+    "followDistance": _safe_float(_maybe_attr(cs, "followDistance", 0.0)),
+    "cruiseGap": _safe_float(_maybe_attr(cs, "cruiseGap", 0.0)),
+    "distanceSetting": _safe_float(_maybe_attr(cs, "distanceSetting", 0.0)),
+    "accDistance": _safe_float(_maybe_attr(cs, "accDistance", 0.0)),
+    "stockFollowDistance": _safe_float(_maybe_attr(cs, "stockFollowDistance", 0.0)),
+    "teslaFollowDistance": _safe_float(_maybe_attr(cs, "teslaFollowDistance", 0.0)),
   }
   if cruise is not None:
     out["cruiseState"] = {
@@ -133,6 +141,9 @@ def _car_state_summary(cs: Any) -> dict[str, Any]:
       "standstill": _safe_bool(_maybe_attr(cruise, "standstill", False)),
       "speed": _safe_float(_maybe_attr(cruise, "speed", 0.0)),
       "speedCluster": _safe_float(_maybe_attr(cruise, "speedCluster", 0.0)),
+      "modeSel": _safe_float(_maybe_attr(cruise, "modeSel", 0.0)),
+      "gap": _safe_float(_maybe_attr(cruise, "gap", 0.0)),
+      "followDistance": _safe_float(_maybe_attr(cruise, "followDistance", 0.0)),
     }
   return out
 
@@ -230,6 +241,42 @@ def _mapd_summary(mo: Any) -> dict[str, Any]:
   return out
 
 
+def _first_nonzero_float(*values: Any) -> float:
+  for value in values:
+    out = _safe_float(value, 0.0)
+    if abs(out) > 0.001:
+      return float(out)
+  return 0.0
+
+
+def _follow_gap_summary(car: dict[str, Any], plan: dict[str, Any], lead1: dict[str, Any], lead2: dict[str, Any]) -> dict[str, Any]:
+  cruise = car.get("cruiseState", {}) if isinstance(car.get("cruiseState"), dict) else {}
+  primary = lead1 if bool(lead1.get("status")) else lead2
+  v_ego = _safe_float(car.get("vEgo"), 0.0)
+  d_rel = _safe_float(primary.get("dRel"), 0.0)
+  actual_gap_s = d_rel / max(v_ego, 0.1) if d_rel > 0.1 and v_ego > 0.1 else 0.0
+  stalk_gap = _first_nonzero_float(
+    car.get("followDistance"),
+    car.get("cruiseGap"),
+    car.get("distanceSetting"),
+    car.get("accDistance"),
+    car.get("stockFollowDistance"),
+    car.get("teslaFollowDistance"),
+    cruise.get("gap") if isinstance(cruise, dict) else 0.0,
+    cruise.get("followDistance") if isinstance(cruise, dict) else 0.0,
+    cruise.get("modeSel") if isinstance(cruise, dict) else 0.0,
+  )
+  return {
+    "desiredTF": _safe_float(plan.get("desiredTF"), 0.0),
+    "actualGapS": actual_gap_s,
+    "dRel": d_rel,
+    "stalkGap": stalk_gap,
+    "cruiseButtons": _safe_int(car.get("cruiseButtons"), 0),
+    "cruiseButtonsCounter": _safe_int(car.get("cruiseButtonsCounter"), 0),
+  }
+
+
+
 def _model_summary(model: Any) -> dict[str, Any]:
   out: dict[str, Any] = {}
   leads_out: list[dict[str, Any]] = []
@@ -296,6 +343,7 @@ def _derive_flags(*, car: dict[str, Any], plan: dict[str, Any], lead1: dict[str,
     if val != 0.0:
       vrels.append(val)
   primary_vrel = min(vrels) if vrels else 0.0
+  follow_gap = _follow_gap_summary(car, plan, lead1, lead2)
   return {
     "clearRoadCandidate": bool(no_actual_lead and not _safe_bool(car.get("brakePressed", False)) and v_ego > 4.0),
     "plannerDropVsSet": bool(plan_drop),
@@ -306,6 +354,7 @@ def _derive_flags(*, car: dict[str, Any], plan: dict[str, Any], lead1: dict[str,
     "vEgo": v_ego,
     "pNear": p_near,
     "pPreview": p_preview,
+    "followGap": follow_gap,
     "closingLead": bool((lead1.get("status") or lead2.get("status")) and (primary_vrel < -0.5 or a_target < -0.15)),
     "steeringBusy": bool(abs(_safe_float(car.get("steeringAngleDeg"), 0.0)) > 8.0 or abs(_safe_float(car.get("steeringRateDeg"), 0.0)) > 25.0),
   }
@@ -355,6 +404,11 @@ class SwaglogTail:
     "[XNOR_CRUISE_SYNC]",
     "lead_guard",
     "lead_stuck_cancel",
+    "lead_approach_force",
+    "autoengage_mismatch_reset",
+    "autoengage_stale_block",
+    "lead_flap_block_resume",
+    "lead_takeover_after_autoengage",
     "mapd_cap",
     "mapd_comfort",
   )
@@ -471,6 +525,7 @@ def _write_summary_line(txt_f, record: dict[str, Any]) -> None:
   flags = record["derived"]
   long_log = record.get("long_log") or {}
   flap = record.get("leadState", {})
+  follow = flags.get("followGap", {}) if isinstance(flags.get("followGap"), dict) else {}
   line = (
     f"{record['wall_time']} "
     f"vEgo={flags['vEgo']:.2f} "
@@ -483,6 +538,9 @@ def _write_summary_line(txt_f, record: dict[str, Any]) -> None:
     f"lead2={int(record['radarState']['leadTwo'].get('status', False))} "
     f"leadSel={_safe_str(flap.get('primary', '-'))} "
     f"toggles={_safe_int(flap.get('presenceToggles', 0))} "
+    f"gapS={_safe_float(follow.get('actualGapS'), 0.0):.2f} "
+    f"desiredTF={_safe_float(follow.get('desiredTF'), 0.0):.2f} "
+    f"stalkGap={_safe_float(follow.get('stalkGap'), 0.0):.1f} "
     f"src={flags['longSource'] or '-'} "
     f"tgt={_safe_float(long_log.get('tgt'), 0.0):.2f} "
     f"cur={_safe_float(long_log.get('cur'), 0.0):.2f} "
@@ -559,6 +617,7 @@ def main() -> int:
         "modelV2": model,
         "mapdOut": mapd,
         "leadState": lead_state,
+        "followGap": _follow_gap_summary(car, plan, radar["leadOne"], radar["leadTwo"]),
         "long_log": long_log,
         "recent_long_logs": tail.recent()[-12:],
       }
@@ -582,6 +641,8 @@ def main() -> int:
       if lead_state["present"] and (lead_state["sinceStatusChangeMs"] < 1500 or lead_state["shortDropouts"] > 0):
         interesting = True
       if d["closingLead"] and d["plannerDropVsSet"]:
+        interesting = True
+      if any(marker in d["longSource"] for marker in ("autoengage", "lead_flap", "lead_takeover")):
         interesting = True
 
       if interesting:

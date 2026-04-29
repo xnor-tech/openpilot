@@ -5,12 +5,13 @@ Human-tuned stock cruise syncing for XNOR.
 This keeps the stable owner split and the no-lead curve behavior, while
 making lead-follow recovery smoother and less sticky:
 
-v57 softens map-only curve authority and releases stale lead-curve holds.
+v58 adds a bounded stale-autoengage reset and follow-gap diagnostics support.
 
 - lead-following still stays on the planner tail while a lead is constraining
 - opening / non-constraining leads stop capping the target too aggressively
 - small follow-speed oscillations no longer latch extra far-queue protection
 - no-lead curve control remains planner-first, with mapd only helping release
+- stale autoengage/resume ownership is cleared when a lead is present/closing
 
 XNOR architecture adaptations retained:
 - 5 Hz cruise stalk pacing
@@ -236,6 +237,19 @@ class LongController:
   _LEAD_CLOSE_CANCEL_MIN_ACTIVE_MS = 360
   _LEAD_CLOSE_CANCEL_REPEAT_MS = 1600
 
+  _AUTOENGAGE_LEAD_RESET_MIN_SPEED_MS = 8.0 * CV.MPH_TO_MS
+  _AUTOENGAGE_LEAD_RESET_MAX_GAP_M = 95.0
+  _AUTOENGAGE_LEAD_RESET_TIME_GAP_S = 3.2
+  _AUTOENGAGE_LEAD_RESET_CLOSING_MS = -0.05
+  _AUTOENGAGE_LEAD_RESET_ATARGET_MS2 = -0.20
+  _AUTOENGAGE_LEAD_RESET_ARM_MS = 180
+  _AUTOENGAGE_LEAD_RESET_BLOCK_MS = 3500
+  _AUTOENGAGE_LEAD_RESET_REPEAT_MS = 2000
+  _LEAD_FLAP_WINDOW_MS = 5000
+  _LEAD_FLAP_BLOCK_TOGGLES = 4
+  _LEAD_FLAP_BLOCK_MS = 3200
+  _LEAD_FLAP_RESUME_MARGIN_MS = 0.25 * CV.MPH_TO_MS
+
   def __init__(self) -> None:
     self.acc = ACCController()
     services = ["longitudinalPlan", "radarState", "controlsState"]
@@ -315,6 +329,16 @@ class LongController:
     self._lead_approach_force_last_cancel_ms: int = 0
     self._lead_close_cancel_candidate_since_ms: int = 0
     self._lead_close_cancel_last_cancel_ms: int = 0
+    self._autoengage_lead_candidate_since_ms: int = 0
+    self._autoengage_lead_block_until_ms: int = 0
+    self._autoengage_lead_last_reset_ms: int = 0
+    self._raw_lead_present_prev: bool = False
+    self._lead_flap_window_start_ms: int = 0
+    self._lead_flap_toggle_count: int = 0
+    self._lead_flap_block_until_ms: int = 0
+    self._controls_active: bool = False
+    self._controls_long_state: float = 0.0
+    self._controls_force_decel: bool = False
 
   def _reset_lead_stuck_cancel(self) -> None:
     self._lead_stuck_candidate_since_ms = 0
@@ -329,6 +353,10 @@ class LongController:
 
   def _reset_lead_close_cancel(self) -> None:
     self._lead_close_cancel_candidate_since_ms = 0
+
+  def _reset_autoengage_lead_state(self) -> None:
+    self._autoengage_lead_candidate_since_ms = 0
+    self._autoengage_lead_block_until_ms = 0
 
 
   def _rate_log(self, msg: str) -> None:
@@ -370,12 +398,18 @@ class LongController:
     self._lat_limit_saturated = False
     self._lat_limit_severity = 0.0
     self._lat_limit_source = ""
+    self._controls_active = False
+    self._controls_long_state = 0.0
+    self._controls_force_decel = False
     if not self._controls_state_is_fresh(now_ns=int(now_ns)):
       return
     try:
       controls_state = self._sm["controlsState"]
     except Exception:
       return
+    self._controls_active = bool(getattr(controls_state, "active", False))
+    self._controls_long_state = self._safe_finite_float(getattr(controls_state, "longControlState", 0.0), 0.0)
+    self._controls_force_decel = bool(getattr(controls_state, "forceDecel", False))
     try:
       lat_saturated, lat_severity, lat_source = self._extract_lateral_limit_signal(controls_state)
     except Exception:
@@ -1375,6 +1409,20 @@ class LongController:
             raw_v_rel = lead_two_v_rel
             raw_y_rel = lead_two_y_rel
 
+      raw_changed = bool(raw_lead_present) != bool(self._raw_lead_present_prev)
+      if raw_changed:
+        if self._lead_flap_window_start_ms <= 0 or (int(now_ms) - int(self._lead_flap_window_start_ms)) > int(self._LEAD_FLAP_WINDOW_MS):
+          self._lead_flap_window_start_ms = int(now_ms)
+          self._lead_flap_toggle_count = 1
+        else:
+          self._lead_flap_toggle_count = min(int(self._lead_flap_toggle_count) + 1, 1000)
+        if int(self._lead_flap_toggle_count) >= int(self._LEAD_FLAP_BLOCK_TOGGLES):
+          self._lead_flap_block_until_ms = int(now_ms) + int(self._LEAD_FLAP_BLOCK_MS)
+      elif self._lead_flap_window_start_ms > 0 and (int(now_ms) - int(self._lead_flap_window_start_ms)) > int(self._LEAD_FLAP_WINDOW_MS):
+        self._lead_flap_window_start_ms = int(now_ms)
+        self._lead_flap_toggle_count = 0
+      self._raw_lead_present_prev = bool(raw_lead_present)
+
       if raw_lead_present:
         self._lead_present = True
         self._lead_drel = raw_d_rel
@@ -2017,6 +2065,77 @@ class LongController:
     return True
 
 
+  def _lead_autoengage_reset_active(
+    self,
+    *,
+    now_ms: int,
+    stock_state: str,
+    current_set_ms: float,
+    v_ego_ms: float,
+    planner_last_ms: float,
+    planner_near_ms: float,
+    brake_pressed: bool,
+    gas_pressed: bool,
+  ) -> bool:
+    now = int(now_ms)
+    if bool(brake_pressed):
+      self._reset_autoengage_lead_state()
+      return False
+
+    lead_context = bool(self._lead_present) or bool(self._lp_has_lead) or now <= int(self._lead_recently_cleared_until_ms)
+    if not lead_context:
+      self._reset_autoengage_lead_state()
+      return False
+
+    if float(v_ego_ms) < float(self._AUTOENGAGE_LEAD_RESET_MIN_SPEED_MS):
+      self._reset_autoengage_lead_state()
+      return False
+
+    if int(now) <= int(self._autoengage_lead_block_until_ms):
+      return True
+
+    live_lead_close_enough = False
+    if bool(self._lead_present) and float(self._lead_drel) > 0.0:
+      gap_limit_m = min(
+        float(self._AUTOENGAGE_LEAD_RESET_MAX_GAP_M),
+        max(22.0, float(v_ego_ms) * float(self._AUTOENGAGE_LEAD_RESET_TIME_GAP_S)),
+      )
+      live_lead_close_enough = float(self._lead_drel) <= float(gap_limit_m)
+
+    closing_or_decel = bool(
+      (bool(self._lead_present) and float(self._lead_vrel) <= float(self._AUTOENGAGE_LEAD_RESET_CLOSING_MS))
+      or float(self._lp_a_target) <= float(self._AUTOENGAGE_LEAD_RESET_ATARGET_MS2)
+      or min(float(planner_last_ms), float(planner_near_ms)) < (float(current_set_ms) - (1.0 * CV.MPH_TO_MS))
+    )
+
+    stock_standby = str(stock_state or "").upper() == "STANDBY"
+    long_not_actively_controlling = bool(self._controls_state_last_ns > 0 and float(self._controls_long_state) <= 0.1 and not bool(self._controls_force_decel))
+    manual_or_disconnected = bool(stock_standby or bool(gas_pressed) or long_not_actively_controlling)
+
+    if not (manual_or_disconnected and (live_lead_close_enough or bool(self._lp_has_lead)) and closing_or_decel):
+      self._autoengage_lead_candidate_since_ms = 0
+      return False
+
+    if self._autoengage_lead_candidate_since_ms <= 0:
+      self._autoengage_lead_candidate_since_ms = now
+      return False
+
+    if (now - int(self._autoengage_lead_candidate_since_ms)) < int(self._AUTOENGAGE_LEAD_RESET_ARM_MS):
+      return False
+
+    if (now - int(self._autoengage_lead_last_reset_ms)) < int(self._AUTOENGAGE_LEAD_RESET_REPEAT_MS):
+      return True
+
+    self._autoengage_lead_last_reset_ms = now
+    self._autoengage_lead_block_until_ms = now + int(self._AUTOENGAGE_LEAD_RESET_BLOCK_MS)
+    return True
+
+  def _lead_flap_resume_block_active(self, *, now_ms: int) -> bool:
+    if int(now_ms) > int(self._lead_flap_block_until_ms):
+      return False
+    return bool(self._lead_present) or bool(self._lp_has_lead) or int(now_ms) <= int(self._lead_recently_cleared_until_ms)
+
+
   def _lead_approach_force_cancel_needed(
     self,
     *,
@@ -2363,6 +2482,7 @@ class LongController:
       self._reset_lead_curve_hold()
       self._reset_lead_stuck_cancel()
       self._reset_lead_approach_cancel()
+      self._reset_autoengage_lead_state()
       self._curve_limit_guard_active = False
       self._curve_limit_guard_candidate_since_ms = 0
       self._curve_limit_guard_release_candidate_since_ms = 0
@@ -2379,6 +2499,7 @@ class LongController:
       self._reset_lead_curve_hold()
       self._reset_lead_stuck_cancel()
       self._reset_lead_approach_cancel()
+      self._reset_autoengage_lead_state()
       self._curve_limit_guard_active = False
       self._curve_limit_guard_candidate_since_ms = 0
       self._curve_limit_guard_release_candidate_since_ms = 0
@@ -2391,6 +2512,7 @@ class LongController:
       self._reset_lead_hold()
       self._reset_lead_stuck_cancel()
       self._reset_lead_approach_cancel()
+      self._reset_autoengage_lead_state()
     self._last_active = True
 
     cs_out = getattr(CS, "out", None)
@@ -2917,6 +3039,49 @@ class LongController:
 
     stock_cruise_enabled = stock_state in ("ENABLED", "OVERRIDE", "STANDSTILL")
     brake_pressed = bool(getattr(cs_out, "brakePressed", False))
+    gas_pressed = bool(getattr(cs_out, "gasPressed", False))
+    autoengage_lead_reset = self._lead_autoengage_reset_active(
+      now_ms=int(now),
+      stock_state=str(stock_state),
+      current_set_ms=float(current_set_ms),
+      v_ego_ms=float(v_ego_ms),
+      planner_last_ms=float(planner_last_ms),
+      planner_near_ms=float(planner_near_ms),
+      brake_pressed=bool(brake_pressed),
+      gas_pressed=bool(gas_pressed),
+    )
+    lead_flap_resume_block = self._lead_flap_resume_block_active(now_ms=int(now))
+
+    if bool(autoengage_lead_reset):
+      self._reset_lead_hold()
+      if "autoengage_mismatch_reset" not in src:
+        src = f"{src}+autoengage_mismatch_reset"
+      if stock_state == "STANDBY":
+        msg = (
+          f"[XNOR_CRUISE_SYNC] src={src}+autoengage_stale_block uom={speed_units} "
+          f"tgt={float(desired_ms) * CV.MS_TO_KPH * (CV.KPH_TO_MPH if speed_units == 'MPH' else 1.0):.1f} "
+          f"cur={float(current_set_ms) * CV.MS_TO_KPH * (CV.KPH_TO_MPH if speed_units == 'MPH' else 1.0):.1f} "
+          f"est=0.0 btn={int(CruiseButtons.IDLE)} reason=autoengage_stale_block"
+        )
+        self._rate_log(msg)
+        return LongDecision(None, msg)
+      if self._lead_present and float(self._lead_drel) > 0.0:
+        lead_abs_ms = max(0.0, float(v_ego_ms) + float(self._lead_vrel))
+        takeover_target_ms = min(
+          float(desired_ms),
+          float(planner_last_ms),
+          float(planner_near_ms),
+          max(0.0, float(lead_abs_ms) - (1.0 * CV.MPH_TO_MS)),
+          float(current_set_ms) - (2.0 * CV.MPH_TO_MS) if float(current_set_ms) > 0.1 else float(desired_ms),
+        )
+        if float(takeover_target_ms) < float(desired_ms):
+          desired_ms = float(takeover_target_ms)
+          src = f"{src}+lead_takeover_after_autoengage"
+
+    if bool(lead_flap_resume_block) and float(desired_ms) > (max(float(current_set_ms), float(v_ego_ms)) + float(self._LEAD_FLAP_RESUME_MARGIN_MS)):
+      desired_ms = max(float(current_set_ms), float(v_ego_ms))
+      if "lead_flap_block_resume" not in src:
+        src = f"{src}+lead_flap_block_resume"
 
     if stock_cruise_enabled and self._lead_approach_force_cancel_needed(
       now_ms=int(now),
@@ -3009,6 +3174,11 @@ class LongController:
       speed_limit_target_ms=speed_limit_target_ms,
       set_speed_limit_active=bool(set_speed_limit_active),
     )
+
+    if bool(autoengage_lead_reset) and str(decision.reason).startswith("autoengage"):
+      return LongDecision(None, f"autoengage_stale_block src={src}")
+    if bool(lead_flap_resume_block) and decision.button is not None and CruiseButtons.is_accel(int(decision.button)):
+      return LongDecision(None, f"lead_flap_block_resume src={src}")
 
     if decision.button is None or int(decision.button) == int(CruiseButtons.IDLE):
       return LongDecision(None, f"{decision.reason} src={src}")
