@@ -5,12 +5,12 @@ Human-tuned stock cruise syncing for XNOR.
 This keeps the stable owner split and the no-lead curve behavior, while
 making lead-follow recovery smoother and less sticky:
 
-v60 keeps v59 curve softness, clears stale no-radar planner-lead ownership, and smooths roundabout pre-entry.
+v61 adds an explicit final LONG arbitration state machine.
 
-- lead-following still stays on the planner tail while a lead is constraining
-- opening / non-constraining leads stop capping the target too aggressively
-- small follow-speed oscillations no longer latch extra far-queue protection
-- no-lead curve control remains planner-first, with mapd only helping release
+- lead critical / lead follow / curve pre-entry / curve active / curve exit / cruise sync are resolved in one final pass
+- stale lead/planner ownership is expired before it can hold speed down after curves
+- map-only curve caps are ignored when vision/steering/planner do not confirm the bend
+- curve exit releases cleanly so speed can resume after roundabouts
 
 XNOR architecture adaptations retained:
 - 5 Hz cruise stalk pacing
@@ -230,6 +230,18 @@ class LongController:
   _LOW_SPEED_LEAD_BLOCK_MAX_GAP_M = 16.0
   _LOW_SPEED_LEAD_BLOCK_OPENING_VREL_MS = 1.0
   _LOW_SPEED_LEAD_BLOCK_TARGET_MARGIN_MS = 0.35 * CV.MPH_TO_MS
+  _ARBITRATION_LEAD_CRITICAL_TIME_GAP_S = 1.35
+  _ARBITRATION_LEAD_FOLLOW_TIME_GAP_S = 2.35
+  _ARBITRATION_LEAD_CLOSING_MS = -0.15
+  _ARBITRATION_LEAD_PLANNER_DROP_MS = 1.5 * CV.MPH_TO_MS
+  _ARBITRATION_STALE_LOW_TARGET_DROP_MS = 3.0 * CV.MPH_TO_MS
+  _ARBITRATION_CURVE_MIN_DROP_MS = 3.0 * CV.MPH_TO_MS
+  _ARBITRATION_CURVE_EGO_DROP_MS = 1.0 * CV.MPH_TO_MS
+  _ARBITRATION_CURVE_MAP_VISION_DISAGREE_MS = 8.0 * CV.MPH_TO_MS
+  _ARBITRATION_CURVE_EXIT_RELEASE_MS = 650
+  _ARBITRATION_CURVE_ENTRY_STEP_MS = 2.2 * CV.MPH_TO_MS
+  _ARBITRATION_CURVE_EXIT_STEP_MS = 3.6 * CV.MPH_TO_MS
+
 
   _LEAD_CLOSE_CANCEL_MIN_SPEED_MS = 5.0 * CV.MPH_TO_MS
   _LEAD_CLOSE_CANCEL_MAX_SPEED_MS = 32.0 * CV.MPH_TO_MS
@@ -320,6 +332,11 @@ class LongController:
     self._lead_approach_force_last_cancel_ms: int = 0
     self._lead_close_cancel_candidate_since_ms: int = 0
     self._lead_close_cancel_last_cancel_ms: int = 0
+    self._arbitration_state: str = "INIT"
+    self._arbitration_state_since_ms: int = 0
+    self._arbitration_last_update_ms: int = 0
+    self._arbitration_curve_target_ms: float = 0.0
+
 
   def _reset_lead_stuck_cancel(self) -> None:
     self._lead_stuck_candidate_since_ms = 0
@@ -2326,6 +2343,295 @@ class LongController:
     set_drop_ms = max(0.0, float(base_target_ms) - float(planner_ms))
     return bool(set_drop_ms <= float(self._STALE_PLANNER_LEAD_MIN_DROP_MS) or float(planner_ms) >= (float(v_ego_ms) - 0.25 * CV.MPH_TO_MS))
 
+  def _set_arbitration_state(self, *, state: str, now_ms: int) -> None:
+    if str(self._arbitration_state) != str(state):
+      self._arbitration_state = str(state)
+      self._arbitration_state_since_ms = int(now_ms)
+    self._arbitration_last_update_ms = int(now_ms)
+
+
+  def _reset_arbitration_state(self) -> None:
+    self._arbitration_state = "INIT"
+    self._arbitration_state_since_ms = 0
+    self._arbitration_last_update_ms = 0
+    self._arbitration_curve_target_ms = 0.0
+
+
+  def _arbitration_curve_candidate(
+    self,
+    *,
+    now_ns: int,
+    reference_ms: float,
+    planner_near_ms: float,
+    v_ego_ms: float,
+    current_angle_deg: float,
+    steering_rate_deg: float,
+    lp_fresh: bool,
+    live_lead_context: bool,
+  ) -> tuple[Optional[float], str]:
+    planner_curve_active = bool(
+      bool(lp_fresh)
+      and float(planner_near_ms) > 0.1
+      and float(planner_near_ms) < (float(reference_ms) - float(self._ARBITRATION_CURVE_MIN_DROP_MS))
+    )
+
+    raw_map_ms, raw_vision_ms = self._curve_specific_mapd_sources(now_ns=int(now_ns))
+    map_supports = bool(
+      raw_map_ms is not None
+      and float(raw_map_ms) > 0.1
+      and float(raw_map_ms) < (float(reference_ms) - float(self._ARBITRATION_CURVE_MIN_DROP_MS))
+    )
+    vision_supports = bool(
+      raw_vision_ms is not None
+      and float(raw_vision_ms) > 0.1
+      and float(raw_vision_ms) < (float(reference_ms) - float(self._ARBITRATION_CURVE_MIN_DROP_MS))
+    )
+    steer_busy = self._steer_busy_for_curve(
+      current_angle_deg=float(current_angle_deg),
+      steering_rate_deg=float(steering_rate_deg),
+    )
+
+    if not (planner_curve_active or map_supports or vision_supports):
+      return None, "no_curve"
+
+    map_only_low = bool(
+      map_supports
+      and not vision_supports
+      and (
+        raw_vision_ms is None
+        or float(raw_vision_ms) > (float(raw_map_ms) + float(self._ARBITRATION_CURVE_MAP_VISION_DISAGREE_MS))
+      )
+    )
+
+    if map_only_low and not (planner_curve_active or steer_busy or bool(self._lat_limit_saturated) or bool(live_lead_context)):
+      return None, "map_only_unconfirmed"
+
+    curve_candidates: list[float] = []
+    owner_parts: list[str] = []
+
+    if planner_curve_active:
+      curve_candidates.append(float(planner_near_ms))
+      owner_parts.append("planner")
+
+    curve_specific_ms = self._curve_specific_mapd_target_ms(
+      now_ns=int(now_ns),
+      reference_ms=float(reference_ms),
+      planner_near_ms=float(planner_near_ms) if planner_curve_active else None,
+      current_angle_deg=float(current_angle_deg),
+      planner_curve_active=bool(planner_curve_active),
+    )
+    if curve_specific_ms is not None and float(curve_specific_ms) > 0.1:
+      curve_candidates.append(float(curve_specific_ms))
+      owner_parts.append("mapd_comfort" if bool(self._mapd_comfort_bias_active) else "mapd")
+
+    if not curve_candidates:
+      return None, "no_curve_target"
+
+    target_ms = float(min(curve_candidates))
+    if float(target_ms) > (float(reference_ms) - float(self._ARBITRATION_CURVE_MIN_DROP_MS)):
+      return None, "curve_too_small"
+    if float(target_ms) > (float(v_ego_ms) - float(self._ARBITRATION_CURVE_EGO_DROP_MS)) and not steer_busy:
+      return None, "curve_not_urgent"
+
+    return float(target_ms), "+".join(owner_parts) if owner_parts else "curve"
+
+
+  def _arbitrate_target_state_machine(
+    self,
+    *,
+    now_ms: int,
+    now_ns: int,
+    desired_ms: float,
+    src: str,
+    reference_ms: float,
+    current_set_ms: float,
+    v_ego_ms: float,
+    planner_last_ms: float,
+    planner_near_ms: float,
+    lp_fresh: bool,
+    cs_out,
+  ) -> tuple[float, str]:
+    current_angle_deg = abs(float(getattr(cs_out, "steeringAngleDeg", 0.0) or 0.0))
+    steering_rate_deg = abs(float(getattr(cs_out, "steeringRateDeg", 0.0) or 0.0))
+    reference_ms = max(float(reference_ms), float(current_set_ms), float(v_ego_ms), float(self.MIN_CRUISE_SPEED_MS))
+
+    live_lead = bool(
+      bool(self._lead_present)
+      and float(self._lead_drel) > 0.0
+      and abs(float(self._lead_yrel)) < float(self._LEAD_OFFLANE_YREL_M)
+    )
+    lead_time_gap_s = float(self._lead_drel) / max(float(v_ego_ms), 0.1) if live_lead else 99.0
+    lead_opening_clear = bool(
+      live_lead
+      and self._lead_is_opening_clear(base_target_ms=float(reference_ms), v_ego_ms=float(v_ego_ms))
+    )
+    lead_closing = bool(
+      live_lead
+      and (
+        float(self._lead_vrel) <= float(self._ARBITRATION_LEAD_CLOSING_MS)
+        or float(self._lp_a_target) <= float(self._LEAD_OPENING_RELAX_ATARGET_MS2)
+      )
+    )
+
+    stale_planner_lead = self._stale_planner_lead_without_live_lead(
+      now_ms=int(now_ms),
+      base_target_ms=float(reference_ms),
+      planner_ms=float(planner_last_ms),
+      v_ego_ms=float(v_ego_ms),
+    )
+    planner_lead_valid = bool(bool(lp_fresh) and bool(self._lp_has_lead) and not stale_planner_lead)
+    planner_floor_ms = min(float(planner_last_ms), float(planner_near_ms))
+    planner_below_reference = bool(
+      float(planner_floor_ms) > 0.1
+      and float(planner_floor_ms) < (float(reference_ms) - float(self._ARBITRATION_LEAD_PLANNER_DROP_MS))
+    )
+
+    planner_curve_input_ms = float(planner_near_ms)
+    if stale_planner_lead and not live_lead:
+      planner_curve_input_ms = float(reference_ms)
+
+    curve_candidate_ms, curve_source = self._arbitration_curve_candidate(
+      now_ns=int(now_ns),
+      reference_ms=float(reference_ms),
+      planner_near_ms=float(planner_curve_input_ms),
+      v_ego_ms=float(v_ego_ms),
+      current_angle_deg=float(current_angle_deg),
+      steering_rate_deg=float(steering_rate_deg),
+      lp_fresh=bool(lp_fresh),
+      live_lead_context=bool(live_lead or planner_lead_valid or int(now_ms) <= int(self._lead_recently_cleared_until_ms)),
+    )
+    curve_confirmed = curve_candidate_ms is not None
+
+    lead_critical = bool(
+      live_lead
+      and not lead_opening_clear
+      and (
+        lead_time_gap_s <= float(self._ARBITRATION_LEAD_CRITICAL_TIME_GAP_S)
+        or (
+          lead_closing
+          and planner_below_reference
+          and float(planner_floor_ms) < (float(current_set_ms) - float(self._ARBITRATION_LEAD_PLANNER_DROP_MS))
+        )
+        or float(self._lp_a_target) <= float(self._LEAD_APPROACH_CANCEL_STRONG_ATARGET_MS2)
+      )
+    )
+    lead_follow = bool(
+      live_lead
+      and not lead_opening_clear
+      and (
+        lead_critical
+        or lead_closing
+        or lead_time_gap_s <= float(self._ARBITRATION_LEAD_FOLLOW_TIME_GAP_S)
+        or planner_lead_valid
+      )
+    )
+
+    out_ms = float(desired_ms)
+    out_src = str(src)
+
+    if lead_critical:
+      self._set_arbitration_state(state="LEAD_CRITICAL", now_ms=int(now_ms))
+      self._reset_curve_hold()
+      self._reset_lead_curve_hold()
+      if float(planner_floor_ms) > 0.1:
+        out_ms = min(float(out_ms), float(planner_floor_ms))
+      if float(current_set_ms) > 0.1:
+        out_ms = min(float(out_ms), float(current_set_ms))
+      if lead_closing:
+        lead_speed_cap_ms = max(0.0, float(v_ego_ms) + float(self._lead_vrel) + (0.5 * CV.MPH_TO_MS))
+        if float(lead_speed_cap_ms) > 0.1:
+          out_ms = min(float(out_ms), float(lead_speed_cap_ms))
+      out_src = f"{out_src}+state[LEAD_CRITICAL]"
+      return float(out_ms), out_src
+
+    if lead_follow:
+      self._set_arbitration_state(state="LEAD_FOLLOW", now_ms=int(now_ms))
+      self._reset_curve_hold()
+      if planner_below_reference and float(planner_floor_ms) > 0.1:
+        out_ms = min(float(out_ms), float(planner_floor_ms))
+      if lead_closing and float(current_set_ms) > 0.1:
+        out_ms = min(float(out_ms), max(0.0, float(current_set_ms)))
+      if lead_closing and ("speed_limit_target" in out_src) and ("planner[" not in out_src):
+        out_ms = min(float(out_ms), max(0.0, float(current_set_ms) if float(current_set_ms) > 0.1 else float(v_ego_ms)))
+        out_src = f"{out_src}+lead_flap_block_resume"
+      out_src = f"{out_src}+state[LEAD_FOLLOW]"
+      return float(out_ms), out_src
+
+    no_live_lead = bool(not live_lead and not planner_lead_valid)
+    stale_low_target = bool(
+      no_live_lead
+      and not curve_confirmed
+      and float(out_ms) < (float(reference_ms) - float(self._ARBITRATION_STALE_LOW_TARGET_DROP_MS))
+      and (
+        "planner[lead" in out_src
+        or "lead_hold" in out_src
+        or "lead_present_hold" in out_src
+        or "lead_curve_hold" in out_src
+        or stale_planner_lead
+      )
+    )
+    if stale_low_target:
+      self._reset_lead_hold()
+      self._reset_lead_curve_hold()
+      self._reset_curve_hold()
+      self._set_arbitration_state(state="RECOVERY", now_ms=int(now_ms))
+      out_ms = float(reference_ms)
+      out_src = f"{out_src}+state[RECOVERY]+stale_lead_release"
+      return float(out_ms), out_src
+
+    if curve_confirmed and float(curve_candidate_ms) < (float(reference_ms) - float(self._ARBITRATION_CURVE_MIN_DROP_MS)):
+      state = "CURVE_ACTIVE" if str(self._arbitration_state).startswith("CURVE") else "CURVE_PRE_ENTRY"
+      previous_update_ms = int(self._arbitration_last_update_ms)
+      previous_curve_ms = float(self._arbitration_curve_target_ms) if float(self._arbitration_curve_target_ms) > 0.1 else float(out_ms)
+      self._set_arbitration_state(state=state, now_ms=int(now_ms))
+      target_ms = max(float(self.MIN_CRUISE_SPEED_MS), float(curve_candidate_ms))
+
+      dt_s = 0.2
+      if previous_update_ms > 0:
+        dt_s = max(0.05, min(1.0, (int(now_ms) - previous_update_ms) / 1000.0))
+      if target_ms < previous_curve_ms:
+        target_ms = max(float(target_ms), previous_curve_ms - float(self._ARBITRATION_CURVE_ENTRY_STEP_MS) * dt_s)
+      else:
+        target_ms = min(float(target_ms), previous_curve_ms + float(self._ARBITRATION_CURVE_EXIT_STEP_MS) * dt_s)
+
+      self._arbitration_curve_target_ms = float(target_ms)
+      out_ms = min(float(out_ms), float(target_ms))
+      out_src = f"{out_src}+state[{state}:{curve_source}]"
+      return float(out_ms), out_src
+
+    previous_curve_state = str(self._arbitration_state).startswith("CURVE")
+    if previous_curve_state and no_live_lead:
+      self._reset_curve_hold()
+      if (int(now_ms) - int(self._arbitration_state_since_ms)) >= int(self._ARBITRATION_CURVE_EXIT_RELEASE_MS):
+        self._set_arbitration_state(state="CRUISE_SYNC", now_ms=int(now_ms))
+        self._arbitration_curve_target_ms = 0.0
+        out_ms = max(float(out_ms), min(float(reference_ms), max(float(current_set_ms), float(v_ego_ms))))
+        out_src = f"{out_src}+state[CURVE_EXIT_RELEASE]"
+      else:
+        self._set_arbitration_state(state="CURVE_EXIT", now_ms=int(now_ms))
+        exit_target_ms = float(self._arbitration_curve_target_ms) if float(self._arbitration_curve_target_ms) > 0.1 else float(out_ms)
+        exit_target_ms = min(float(reference_ms), exit_target_ms + float(self._ARBITRATION_CURVE_EXIT_STEP_MS) * 0.2)
+        self._arbitration_curve_target_ms = float(exit_target_ms)
+        out_ms = max(float(out_ms), float(exit_target_ms))
+        out_src = f"{out_src}+state[CURVE_EXIT]"
+      return float(out_ms), out_src
+
+    if no_live_lead:
+      self._reset_lead_hold()
+      self._reset_lead_curve_hold()
+      if "map_only_unconfirmed" in curve_source:
+        self._reset_curve_hold()
+        self._mapd_stale_block_until_ms = int(now_ms) + int(self._MAPD_STRAIGHT_STALE_BLOCK_MS)
+        out_ms = max(float(out_ms), min(float(reference_ms), max(float(current_set_ms), float(v_ego_ms))))
+        out_src = f"{out_src}+state[CRUISE_SYNC]+map_only_unconfirmed"
+      self._set_arbitration_state(state="CRUISE_SYNC", now_ms=int(now_ms))
+      self._arbitration_curve_target_ms = 0.0
+      return float(out_ms), out_src
+
+    self._set_arbitration_state(state="RECOVERY", now_ms=int(now_ms))
+    return float(out_ms), f"{out_src}+state[RECOVERY]"
+
+
   def _planner_drag_reasons(self, *, now_ms: int, base_target_ms: float, planner_ms: float, current_set_ms: float, v_ego_ms: float) -> list[str]:
     if float(planner_ms) <= 0.1:
       return []
@@ -2408,6 +2714,7 @@ class LongController:
       self._reset_lead_curve_hold()
       self._reset_lead_stuck_cancel()
       self._reset_lead_approach_cancel()
+      self._reset_arbitration_state()
       self._curve_limit_guard_active = False
       self._curve_limit_guard_candidate_since_ms = 0
       self._curve_limit_guard_release_candidate_since_ms = 0
@@ -2424,6 +2731,7 @@ class LongController:
       self._reset_lead_curve_hold()
       self._reset_lead_stuck_cancel()
       self._reset_lead_approach_cancel()
+      self._reset_arbitration_state()
       self._curve_limit_guard_active = False
       self._curve_limit_guard_candidate_since_ms = 0
       self._curve_limit_guard_release_candidate_since_ms = 0
@@ -2436,6 +2744,7 @@ class LongController:
       self._reset_lead_hold()
       self._reset_lead_stuck_cancel()
       self._reset_lead_approach_cancel()
+      self._reset_arbitration_state()
     self._last_active = True
 
     cs_out = getattr(CS, "out", None)
@@ -2936,6 +3245,20 @@ class LongController:
       )
       if curve_accel_blocked and "curve_accel_block[steer_busy]" not in src:
         src = f"{src}+curve_accel_block[steer_busy]"
+
+    desired_ms, src = self._arbitrate_target_state_machine(
+      now_ms=int(now),
+      now_ns=int(now_ns),
+      desired_ms=float(desired_ms),
+      src=str(src),
+      reference_ms=float(curve_reference_ms),
+      current_set_ms=float(current_set_ms),
+      v_ego_ms=float(v_ego_ms),
+      planner_last_ms=float(planner_last_ms),
+      planner_near_ms=float(planner_near_ms),
+      lp_fresh=bool(lp_fresh),
+      cs_out=cs_out,
+    )
 
     desired_ms, lead_low_speed_blocked = self._low_speed_lead_block_target(
       now_ms=int(now),
