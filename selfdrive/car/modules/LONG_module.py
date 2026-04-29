@@ -5,7 +5,7 @@ Human-tuned stock cruise syncing for XNOR.
 This keeps the stable owner split and the no-lead curve behavior, while
 making lead-follow recovery smoother and less sticky:
 
-v59 rolls back the v58 autoengage watchdog and softens curve/mapd holds.
+v60 keeps v59 curve softness, clears stale no-radar planner-lead ownership, and smooths roundabout pre-entry.
 
 - lead-following still stays on the planner tail while a lead is constraining
 - opening / non-constraining leads stop capping the target too aggressively
@@ -62,17 +62,17 @@ class LongController:
   _LEAD_PLANNER_GUARD_MIN_GAP_M = 38.0
   _LEAD_PLANNER_GUARD_MAX_GAP_M = 72.0
 
-  _CURVE_ENTRY_PERSIST_MS = 320
-  _CURVE_EXIT_PERSIST_MS = 120
-  _CURVE_EXIT_RECOVERY_MS_PER_S = 7.0
-  _CURVE_HOLD_ENTRY_FREEZE_MS = 650
+  _CURVE_ENTRY_PERSIST_MS = 240
+  _CURVE_EXIT_PERSIST_MS = 420
+  _CURVE_EXIT_RECOVERY_MS_PER_S = 3.2
+  _CURVE_HOLD_ENTRY_FREEZE_MS = 900
   _CURVE_HOLD_DROP_PERSIST_MS = 260
   _CURVE_HOLD_DROP_RATE_MS_PER_S = 1.8
   _CURVE_HOLD_HARD_DROP_EXTRA_MS = 5.0 * CV.MPH_TO_MS
   _CURVE_ENTRY_PREVIEW_DROP_MS = 2.0 * CV.MPH_TO_MS
   _CURVE_PRE_ENTRY_MIN_DROP_MS = 4.0 * CV.MPH_TO_MS
   _CURVE_PRE_ENTRY_PREVIEW_DROP_MS = 5.0 * CV.MPH_TO_MS
-  _CURVE_PRE_ENTRY_MIN_RATIO = 0.30
+  _CURVE_PRE_ENTRY_MIN_RATIO = 0.42
   _CURVE_MIN_CRUISE_HOLD_MARGIN_MS = 5.0 * CV.MPH_TO_MS
   _CURVE_MAPD_MIN_HOLD_MARGIN_MS = 0.5 * CV.MPH_TO_MS
   _CURVE_HARD_ENTRY_EXTRA_MS = 3.0 * CV.MPH_TO_MS
@@ -154,6 +154,10 @@ class LongController:
   _WEAK_LEAD_OWNER_VREL_MS = -0.35
   _WEAK_LEAD_OWNER_ATARGET_MS2 = -0.35
   _WEAK_LEAD_OWNER_TIME_GAP_S = 2.2
+  _STALE_PLANNER_LEAD_CLEAR_MS = 900
+  _STALE_PLANNER_LEAD_MAX_ATARGET_MS2 = -0.20
+  _STALE_PLANNER_LEAD_MIN_DROP_MS = 2.0 * CV.MPH_TO_MS
+  _STALE_PLANNER_LEAD_MAX_LIVE_DROP_MS = 0.75 * CV.MPH_TO_MS
 
   _CURVE_FORCE_ENTRY_MIN_SPEED_MS = 18.0 * CV.MPH_TO_MS
   _CURVE_FORCE_ENTRY_MIN_DROP_MS = 6.0 * CV.MPH_TO_MS
@@ -2294,8 +2298,43 @@ class LongController:
     return False
 
 
+  def _stale_planner_lead_without_live_lead(
+    self,
+    *,
+    now_ms: int,
+    base_target_ms: float,
+    planner_ms: float,
+    v_ego_ms: float,
+  ) -> bool:
+    if bool(self._lead_present) or not bool(self._lp_has_lead):
+      return False
+    if int(now_ms) <= int(self._lead_recently_cleared_until_ms):
+      return False
+    if (int(now_ms) - int(self._lead_raw_seen_ms)) < int(self._STALE_PLANNER_LEAD_CLEAR_MS):
+      return False
+    if str(self._lp_source or "") in ("lead0", "lead1"):
+      return False
+    if float(self._lp_a_target) <= float(self._STALE_PLANNER_LEAD_MAX_ATARGET_MS2):
+      return False
+
+    # Keep genuine model-led decel, but drop stale planner-lead ownership that
+    # only tracks the current set speed after radar has cleared.
+    live_drop_ms = max(0.0, min(float(base_target_ms), float(v_ego_ms)) - float(planner_ms))
+    if live_drop_ms > float(self._STALE_PLANNER_LEAD_MAX_LIVE_DROP_MS):
+      return False
+
+    set_drop_ms = max(0.0, float(base_target_ms) - float(planner_ms))
+    return bool(set_drop_ms <= float(self._STALE_PLANNER_LEAD_MIN_DROP_MS) or float(planner_ms) >= (float(v_ego_ms) - 0.25 * CV.MPH_TO_MS))
+
   def _planner_drag_reasons(self, *, now_ms: int, base_target_ms: float, planner_ms: float, current_set_ms: float, v_ego_ms: float) -> list[str]:
     if float(planner_ms) <= 0.1:
+      return []
+    if self._stale_planner_lead_without_live_lead(
+      now_ms=int(now_ms),
+      base_target_ms=float(base_target_ms),
+      planner_ms=float(planner_ms),
+      v_ego_ms=float(v_ego_ms),
+    ):
       return []
 
     materially_below_base = float(planner_ms) < (float(base_target_ms) - float(self._PLANNER_DRAG_MARGIN_MS))

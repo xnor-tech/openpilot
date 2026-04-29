@@ -12,6 +12,7 @@ The acceleration side is tuned to feel more natural:
 - clear-road jumps may still begin with 5-step RES pulses
 - active lead-following sticks to 1-step RES pulses for smoother spacing
 - cadence stays calmer while a lead is still present to reduce hunting
+- v60 adds a bounded SET fallback when RES autoengage is ignored from STANDBY
 """
 
 from __future__ import annotations
@@ -64,6 +65,8 @@ class ACCController:
   _FAST_DECEL_RESUME_HOLDOFF_MS = 2000
   _LEAD_FRESH_MS = 450
   _AUTOENGAGE_SPEED_WINDOW_MS = 0.8
+  _AUTOENGAGE_SET_FALLBACK_MS = 1400
+  _AUTOENGAGE_SET_FALLBACK_REPEAT_MS = 2200
   _AUTO_ECHO_IGNORE_MS = 550
   _MIN_CRUISE_HOLD_MARGIN_MS = 5.0 * CV.MPH_TO_MS
   _MIN_CRUISE_CANCEL_VEGO_MARGIN_MS = 1.0 * CV.MPH_TO_MS
@@ -106,6 +109,8 @@ class ACCController:
     self._last_current_set_speed_kph = 0.0
     self._lead_follow_offset_sign = 0
     self._lead_follow_offset_since_ms = 0
+    self._standby_autoengage_started_ms = 0
+    self._standby_autoengage_last_set_ms = 0
 
     self._radar_sm = messaging.SubMaster(["radarState"])
 
@@ -431,6 +436,8 @@ class ACCController:
   def _reset_lead_follow_deadband(self) -> None:
     self._lead_follow_offset_sign = 0
     self._lead_follow_offset_since_ms = 0
+    self._standby_autoengage_started_ms = 0
+    self._standby_autoengage_last_set_ms = 0
 
   def _lead_follow_effective_speed_offset_kph(
     self,
@@ -617,6 +624,8 @@ class ACCController:
     if not enabled:
       self._reset_accel_burst()
       self._clear_manual_pending()
+      self._standby_autoengage_started_ms = 0
+      self._standby_autoengage_last_set_ms = 0
       return AccDecision(None, "gated: not enabled")
 
     if (
@@ -686,17 +695,38 @@ class ACCController:
     # An explicit manual raise is the only thing that should clear a manual-lower hold.
 
     if stock_state == "STANDBY":
-      if (
+      can_autoengage = (
         float(desired_speed_ms) >= float(v_ego_ms) - float(self._AUTOENGAGE_SPEED_WINDOW_MS)
         and self._no_human_action_for(now_ms=now_ms, milliseconds=self._HUMAN_COOLDOWN_MS)
         and self._no_automated_action_for(now_ms=now_ms, milliseconds=self._AUTO_COOLDOWN_MS)
         and self._should_autoengage_cc(now_ms=now_ms, v_ego_ms=v_ego_ms, brake_pressed=brake_pressed, lead=lead)
-      ):
+      )
+      if can_autoengage:
+        if int(self._standby_autoengage_started_ms) <= 0:
+          self._standby_autoengage_started_ms = int(now_ms)
+
+        elapsed_ms = int(now_ms) - int(self._standby_autoengage_started_ms)
+        use_set_fallback = (
+          elapsed_ms >= int(self._AUTOENGAGE_SET_FALLBACK_MS)
+          and (int(now_ms) - int(self._standby_autoengage_last_set_ms)) >= int(self._AUTOENGAGE_SET_FALLBACK_REPEAT_MS)
+        )
+
+        if use_set_fallback:
+          button = int(CruiseButtons.DECEL_SET)
+          self._standby_autoengage_last_set_ms = int(now_ms)
+          self._record_button(now_ms=now_ms, button=button, speed_units=speed_units)
+          return AccDecision(button, "autoengage_set_fallback: SET", float(desired_speed_ms) * CV.MS_TO_KPH, current_kph, current_kph)
+
         self._record_button(now_ms=now_ms, button=int(CruiseButtons.RES_ACCEL), speed_units=speed_units)
-        return AccDecision(int(CruiseButtons.RES_ACCEL), "autoengage: RES", current_kph, current_kph, current_kph + float(half_kph))
+        return AccDecision(int(CruiseButtons.RES_ACCEL), "autoengage: RES", float(desired_speed_ms) * CV.MS_TO_KPH, current_kph, current_kph + float(half_kph))
+
+      self._standby_autoengage_started_ms = 0
+      self._standby_autoengage_last_set_ms = 0
       return AccDecision(None, "standby: no autoengage", current_kph, current_kph, current_kph)
 
     if stock_state not in ("ENABLED", "OVERRIDE", "STANDSTILL"):
+      self._standby_autoengage_started_ms = 0
+      self._standby_autoengage_last_set_ms = 0
       return AccDecision(None, f"gated: stock_state={stock_state or 'UNKNOWN'}", current_kph, current_kph, current_kph)
 
     if not stock_cruise_enabled:
