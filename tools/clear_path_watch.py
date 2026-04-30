@@ -112,6 +112,40 @@ def _button_events_summary(cs: Any) -> list[dict[str, Any]]:
   return out
 
 
+def _interesting_named_fields(obj: Any, tokens: tuple[str, ...]) -> dict[str, Any]:
+  out: dict[str, Any] = {}
+  if obj is None:
+    return out
+
+  try:
+    raw = obj.to_dict()
+  except Exception:
+    raw = None
+  if isinstance(raw, dict):
+    for key, value in raw.items():
+      key_s = str(key)
+      if any(token in key_s.lower() for token in tokens):
+        if isinstance(value, (bool, int, float, str)):
+          out[key_s] = value
+    return out
+
+  for name in dir(obj):
+    if name.startswith("_"):
+      continue
+    name_l = name.lower()
+    if not any(token in name_l for token in tokens):
+      continue
+    try:
+      value = getattr(obj, name)
+    except Exception:
+      continue
+    if callable(value):
+      continue
+    if isinstance(value, (bool, int, float, str)):
+      out[str(name)] = value
+  return out
+
+
 def _lead_summary(lead: Any) -> dict[str, Any]:
   if lead is None:
     return {"status": False}
@@ -166,7 +200,24 @@ def _car_state_summary(cs: Any) -> dict[str, Any]:
     "accFollowDistance": _safe_float(_maybe_attr(cs, "accFollowDistance", 0.0)),
     "followTime": _safe_float(_maybe_attr(cs, "followTime", 0.0)),
     "followTimeGap": _safe_float(_maybe_attr(cs, "followTimeGap", 0.0)),
+    "modeSel": _safe_float(_maybe_attr(cs, "modeSel", 0.0)),
+    "accMode": _safe_float(_maybe_attr(cs, "accMode", 0.0)),
+    "gapSetting": _safe_float(_maybe_attr(cs, "gapSetting", 0.0)),
+    "timeGap": _safe_float(_maybe_attr(cs, "timeGap", 0.0)),
+    "apFollowDistance": _safe_float(_maybe_attr(cs, "apFollowDistance", 0.0)),
+    "apFollowTime": _safe_float(_maybe_attr(cs, "apFollowTime", 0.0)),
+    "followDistanceStock": _safe_float(_maybe_attr(cs, "followDistanceStock", 0.0)),
+    "stockGap": _safe_float(_maybe_attr(cs, "stockGap", 0.0)),
+    "teslaGap": _safe_float(_maybe_attr(cs, "teslaGap", 0.0)),
+    "dasFollowDistance": _safe_float(_maybe_attr(cs, "dasFollowDistance", 0.0)),
+    "dasFollowTime": _safe_float(_maybe_attr(cs, "dasFollowTime", 0.0)),
+    "DAS_followDistance": _safe_float(_maybe_attr(cs, "DAS_followDistance", 0.0)),
+    "DAS_timeGap": _safe_float(_maybe_attr(cs, "DAS_timeGap", 0.0)),
+    "cruiseFollowDistance": _safe_float(_maybe_attr(cs, "cruiseFollowDistance", 0.0)),
+    "cruiseTimeGap": _safe_float(_maybe_attr(cs, "cruiseTimeGap", 0.0)),
+    "longitudinalControlGap": _safe_float(_maybe_attr(cs, "longitudinalControlGap", 0.0)),
     "buttonEvents": _button_events_summary(cs),
+    "rawGapFields": _interesting_named_fields(cs, ("gap", "follow", "distance", "timegap", "modesel")),
   }
   if cruise is not None:
     out["cruiseState"] = {
@@ -181,6 +232,10 @@ def _car_state_summary(cs: Any) -> dict[str, Any]:
       "distanceSetting": _safe_float(_maybe_attr(cruise, "distanceSetting", 0.0)),
       "timeGap": _safe_float(_maybe_attr(cruise, "timeGap", 0.0)),
       "followTime": _safe_float(_maybe_attr(cruise, "followTime", 0.0)),
+      "cruiseGap": _safe_float(_maybe_attr(cruise, "cruiseGap", 0.0)),
+      "gapSetting": _safe_float(_maybe_attr(cruise, "gapSetting", 0.0)),
+      "accDistance": _safe_float(_maybe_attr(cruise, "accDistance", 0.0)),
+      "rawGapFields": _interesting_named_fields(cruise, ("gap", "follow", "distance", "timegap", "modesel")),
     }
   return out
 
@@ -304,13 +359,37 @@ def _follow_gap_summary(car: dict[str, Any], plan: dict[str, Any], lead1: dict[s
     "accFollowDistance": _safe_float(car.get("accFollowDistance"), 0.0),
     "followTime": _safe_float(car.get("followTime"), 0.0),
     "followTimeGap": _safe_float(car.get("followTimeGap"), 0.0),
+    "modeSel": _safe_float(car.get("modeSel"), 0.0),
+    "accMode": _safe_float(car.get("accMode"), 0.0),
+    "gapSetting": _safe_float(car.get("gapSetting"), 0.0),
+    "timeGap": _safe_float(car.get("timeGap"), 0.0),
+    "apFollowDistance": _safe_float(car.get("apFollowDistance"), 0.0),
+    "apFollowTime": _safe_float(car.get("apFollowTime"), 0.0),
+    "followDistanceStock": _safe_float(car.get("followDistanceStock"), 0.0),
+    "stockGap": _safe_float(car.get("stockGap"), 0.0),
+    "teslaGap": _safe_float(car.get("teslaGap"), 0.0),
+    "dasFollowDistance": _safe_float(car.get("dasFollowDistance"), 0.0),
+    "dasFollowTime": _safe_float(car.get("dasFollowTime"), 0.0),
+    "DAS_followDistance": _safe_float(car.get("DAS_followDistance"), 0.0),
+    "DAS_timeGap": _safe_float(car.get("DAS_timeGap"), 0.0),
+    "cruiseFollowDistance": _safe_float(car.get("cruiseFollowDistance"), 0.0),
+    "cruiseTimeGap": _safe_float(car.get("cruiseTimeGap"), 0.0),
+    "longitudinalControlGap": _safe_float(car.get("longitudinalControlGap"), 0.0),
     "cruiseState.gap": _safe_float(cruise.get("gap") if isinstance(cruise, dict) else 0.0, 0.0),
     "cruiseState.followDistance": _safe_float(cruise.get("followDistance") if isinstance(cruise, dict) else 0.0, 0.0),
     "cruiseState.distanceSetting": _safe_float(cruise.get("distanceSetting") if isinstance(cruise, dict) else 0.0, 0.0),
     "cruiseState.modeSel": _safe_float(cruise.get("modeSel") if isinstance(cruise, dict) else 0.0, 0.0),
     "cruiseState.timeGap": _safe_float(cruise.get("timeGap") if isinstance(cruise, dict) else 0.0, 0.0),
     "cruiseState.followTime": _safe_float(cruise.get("followTime") if isinstance(cruise, dict) else 0.0, 0.0),
+    "cruiseState.cruiseGap": _safe_float(cruise.get("cruiseGap") if isinstance(cruise, dict) else 0.0, 0.0),
+    "cruiseState.gapSetting": _safe_float(cruise.get("gapSetting") if isinstance(cruise, dict) else 0.0, 0.0),
+    "cruiseState.accDistance": _safe_float(cruise.get("accDistance") if isinstance(cruise, dict) else 0.0, 0.0),
   }
+  for key, value in (car.get("rawGapFields") or {}).items():
+    raw_candidates[f"raw.{key}"] = _safe_float(value, 0.0)
+  if isinstance(cruise, dict):
+    for key, value in (cruise.get("rawGapFields") or {}).items():
+      raw_candidates[f"cruiseState.raw.{key}"] = _safe_float(value, 0.0)
   active_name = ""
   stalk_gap = 0.0
   for name, value in raw_candidates.items():
@@ -333,6 +412,7 @@ def _follow_gap_summary(car: dict[str, Any], plan: dict[str, Any], lead1: dict[s
     "stalkGapField": active_name,
     "rawCandidates": raw_candidates,
     "gapButtonEvents": gap_button_events[-6:],
+    "buttonEvents": button_events[-8:],
     "cruiseButtons": _safe_int(car.get("cruiseButtons"), 0),
     "cruiseButtonsCounter": _safe_int(car.get("cruiseButtonsCounter"), 0),
   }
@@ -605,6 +685,7 @@ def _write_summary_line(txt_f, record: dict[str, Any]) -> None:
     f"stalkGap={_safe_float(follow.get('stalkGap'), 0.0):.1f} "
     f"stalkField={_safe_str(follow.get('stalkGapField'), '-') or '-'} "
     f"gapBtn={','.join(_safe_str(e.get('type'), '') for e in (follow.get('gapButtonEvents') or [])[-2:]) or '-'} "
+    f"btnEvt={','.join(_safe_str(e.get('type'), '') for e in (follow.get('buttonEvents') or [])[-3:]) or '-'} "
     f"src={flags['longSource'] or '-'} "
     f"tgt={_safe_float(long_log.get('tgt'), 0.0):.2f} "
     f"cur={_safe_float(long_log.get('cur'), 0.0):.2f} "
