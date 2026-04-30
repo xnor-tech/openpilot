@@ -83,6 +83,35 @@ def _maybe_attr(obj: Any, name: str, default: Any = None) -> Any:
     return default
 
 
+def _enum_name(value: Any) -> str:
+  try:
+    name = getattr(value, "name")
+    if name is not None:
+      return str(name)
+  except Exception:
+    pass
+  try:
+    return str(value).split(".")[-1]
+  except Exception:
+    return ""
+
+
+def _button_events_summary(cs: Any) -> list[dict[str, Any]]:
+  out: list[dict[str, Any]] = []
+  try:
+    events = list(_maybe_attr(cs, "buttonEvents", []) or [])
+  except Exception:
+    return out
+  for event in events[-12:]:
+    event_type = _maybe_attr(event, "type", None)
+    out.append({
+      "type": _enum_name(event_type),
+      "pressed": _safe_bool(_maybe_attr(event, "pressed", False)),
+      "rawType": _safe_str(event_type),
+    })
+  return out
+
+
 def _lead_summary(lead: Any) -> dict[str, Any]:
   if lead is None:
     return {"status": False}
@@ -133,6 +162,11 @@ def _car_state_summary(cs: Any) -> dict[str, Any]:
     "accDistance": _safe_float(_maybe_attr(cs, "accDistance", 0.0)),
     "stockFollowDistance": _safe_float(_maybe_attr(cs, "stockFollowDistance", 0.0)),
     "teslaFollowDistance": _safe_float(_maybe_attr(cs, "teslaFollowDistance", 0.0)),
+    "gapAdjustCruiseTr": _safe_float(_maybe_attr(cs, "gapAdjustCruiseTr", 0.0)),
+    "accFollowDistance": _safe_float(_maybe_attr(cs, "accFollowDistance", 0.0)),
+    "followTime": _safe_float(_maybe_attr(cs, "followTime", 0.0)),
+    "followTimeGap": _safe_float(_maybe_attr(cs, "followTimeGap", 0.0)),
+    "buttonEvents": _button_events_summary(cs),
   }
   if cruise is not None:
     out["cruiseState"] = {
@@ -144,6 +178,9 @@ def _car_state_summary(cs: Any) -> dict[str, Any]:
       "modeSel": _safe_float(_maybe_attr(cruise, "modeSel", 0.0)),
       "gap": _safe_float(_maybe_attr(cruise, "gap", 0.0)),
       "followDistance": _safe_float(_maybe_attr(cruise, "followDistance", 0.0)),
+      "distanceSetting": _safe_float(_maybe_attr(cruise, "distanceSetting", 0.0)),
+      "timeGap": _safe_float(_maybe_attr(cruise, "timeGap", 0.0)),
+      "followTime": _safe_float(_maybe_attr(cruise, "followTime", 0.0)),
     }
   return out
 
@@ -255,22 +292,47 @@ def _follow_gap_summary(car: dict[str, Any], plan: dict[str, Any], lead1: dict[s
   v_ego = _safe_float(car.get("vEgo"), 0.0)
   d_rel = _safe_float(primary.get("dRel"), 0.0)
   actual_gap_s = d_rel / max(v_ego, 0.1) if d_rel > 0.1 and v_ego > 0.1 else 0.0
-  stalk_gap = _first_nonzero_float(
-    car.get("followDistance"),
-    car.get("cruiseGap"),
-    car.get("distanceSetting"),
-    car.get("accDistance"),
-    car.get("stockFollowDistance"),
-    car.get("teslaFollowDistance"),
-    cruise.get("gap") if isinstance(cruise, dict) else 0.0,
-    cruise.get("followDistance") if isinstance(cruise, dict) else 0.0,
-    cruise.get("modeSel") if isinstance(cruise, dict) else 0.0,
-  )
+
+  raw_candidates = {
+    "followDistance": _safe_float(car.get("followDistance"), 0.0),
+    "cruiseGap": _safe_float(car.get("cruiseGap"), 0.0),
+    "distanceSetting": _safe_float(car.get("distanceSetting"), 0.0),
+    "accDistance": _safe_float(car.get("accDistance"), 0.0),
+    "stockFollowDistance": _safe_float(car.get("stockFollowDistance"), 0.0),
+    "teslaFollowDistance": _safe_float(car.get("teslaFollowDistance"), 0.0),
+    "gapAdjustCruiseTr": _safe_float(car.get("gapAdjustCruiseTr"), 0.0),
+    "accFollowDistance": _safe_float(car.get("accFollowDistance"), 0.0),
+    "followTime": _safe_float(car.get("followTime"), 0.0),
+    "followTimeGap": _safe_float(car.get("followTimeGap"), 0.0),
+    "cruiseState.gap": _safe_float(cruise.get("gap") if isinstance(cruise, dict) else 0.0, 0.0),
+    "cruiseState.followDistance": _safe_float(cruise.get("followDistance") if isinstance(cruise, dict) else 0.0, 0.0),
+    "cruiseState.distanceSetting": _safe_float(cruise.get("distanceSetting") if isinstance(cruise, dict) else 0.0, 0.0),
+    "cruiseState.modeSel": _safe_float(cruise.get("modeSel") if isinstance(cruise, dict) else 0.0, 0.0),
+    "cruiseState.timeGap": _safe_float(cruise.get("timeGap") if isinstance(cruise, dict) else 0.0, 0.0),
+    "cruiseState.followTime": _safe_float(cruise.get("followTime") if isinstance(cruise, dict) else 0.0, 0.0),
+  }
+  active_name = ""
+  stalk_gap = 0.0
+  for name, value in raw_candidates.items():
+    if abs(float(value)) > 0.001:
+      active_name = str(name)
+      stalk_gap = float(value)
+      break
+
+  button_events = car.get("buttonEvents", []) if isinstance(car.get("buttonEvents"), list) else []
+  gap_button_events = [
+    event for event in button_events
+    if any(token in _safe_str(event.get("type", "")).lower() for token in ("gap", "distance", "follow"))
+  ]
+
   return {
     "desiredTF": _safe_float(plan.get("desiredTF"), 0.0),
     "actualGapS": actual_gap_s,
     "dRel": d_rel,
     "stalkGap": stalk_gap,
+    "stalkGapField": active_name,
+    "rawCandidates": raw_candidates,
+    "gapButtonEvents": gap_button_events[-6:],
     "cruiseButtons": _safe_int(car.get("cruiseButtons"), 0),
     "cruiseButtonsCounter": _safe_int(car.get("cruiseButtonsCounter"), 0),
   }
@@ -541,6 +603,8 @@ def _write_summary_line(txt_f, record: dict[str, Any]) -> None:
     f"gapS={_safe_float(follow.get('actualGapS'), 0.0):.2f} "
     f"desiredTF={_safe_float(follow.get('desiredTF'), 0.0):.2f} "
     f"stalkGap={_safe_float(follow.get('stalkGap'), 0.0):.1f} "
+    f"stalkField={_safe_str(follow.get('stalkGapField'), '-') or '-'} "
+    f"gapBtn={','.join(_safe_str(e.get('type'), '') for e in (follow.get('gapButtonEvents') or [])[-2:]) or '-'} "
     f"src={flags['longSource'] or '-'} "
     f"tgt={_safe_float(long_log.get('tgt'), 0.0):.2f} "
     f"cur={_safe_float(long_log.get('cur'), 0.0):.2f} "

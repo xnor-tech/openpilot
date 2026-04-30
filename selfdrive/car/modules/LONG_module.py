@@ -7,6 +7,8 @@ making lead-follow recovery smoother and less sticky:
 
 v61 adds an explicit final LONG arbitration state machine.
 
+v62 tunes follow-gap-aware lead release, curve comfort bias, and stale clear-road recovery.
+
 - lead critical / lead follow / curve pre-entry / curve active / curve exit / cruise sync are resolved in one final pass
 - stale lead/planner ownership is expired before it can hold speed down after curves
 - map-only curve caps are ignored when vision/steering/planner do not confirm the bend
@@ -241,6 +243,15 @@ class LongController:
   _ARBITRATION_CURVE_EXIT_RELEASE_MS = 650
   _ARBITRATION_CURVE_ENTRY_STEP_MS = 2.2 * CV.MPH_TO_MS
   _ARBITRATION_CURVE_EXIT_STEP_MS = 3.6 * CV.MPH_TO_MS
+  _FOLLOW_GAP_DEFAULT_S = 2.35
+  _FOLLOW_GAP_MIN_S = 1.25
+  _FOLLOW_GAP_MAX_S = 3.35
+  _FOLLOW_GAP_STALK_STEP_S = 0.35
+  _FOLLOW_GAP_RELEASE_HYSTERESIS_S = 0.85
+  _FOLLOW_GAP_RELEASE_VREL_MS = 0.10
+  _CURVE_CONFIRMED_COMFORT_BIAS_MS = 2.0 * CV.MPH_TO_MS
+  _CURVE_MAPD_VISION_DISAGREE_EXTRA_BIAS_MS = 1.25 * CV.MPH_TO_MS
+  _CLEAR_NO_LEAD_STALE_OWNER_DROP_MS = 1.0 * CV.MPH_TO_MS
 
 
   _LEAD_CLOSE_CANCEL_MIN_SPEED_MS = 5.0 * CV.MPH_TO_MS
@@ -2343,6 +2354,54 @@ class LongController:
     set_drop_ms = max(0.0, float(base_target_ms) - float(planner_ms))
     return bool(set_drop_ms <= float(self._STALE_PLANNER_LEAD_MIN_DROP_MS) or float(planner_ms) >= (float(v_ego_ms) - 0.25 * CV.MPH_TO_MS))
 
+
+  def _raw_follow_gap_value(self, cs_out) -> float:
+    candidates: list[object] = [
+      getattr(cs_out, "followDistance", None),
+      getattr(cs_out, "cruiseGap", None),
+      getattr(cs_out, "distanceSetting", None),
+      getattr(cs_out, "accDistance", None),
+      getattr(cs_out, "stockFollowDistance", None),
+      getattr(cs_out, "teslaFollowDistance", None),
+    ]
+    cruise_state = getattr(cs_out, "cruiseState", None)
+    if cruise_state is not None:
+      candidates.extend([
+        getattr(cruise_state, "gap", None),
+        getattr(cruise_state, "followDistance", None),
+        getattr(cruise_state, "modeSel", None),
+      ])
+
+    for value in candidates:
+      try:
+        gap = float(value)
+      except Exception:
+        continue
+      if math.isfinite(gap) and gap > 0.01:
+        return float(gap)
+    return 0.0
+
+
+  def _desired_follow_time_s(self, cs_out) -> float:
+    raw_gap = self._raw_follow_gap_value(cs_out)
+    if raw_gap <= 0.01:
+      return float(self._FOLLOW_GAP_DEFAULT_S)
+
+    if 1.0 <= raw_gap <= 7.0 and abs(raw_gap - round(raw_gap)) < 0.05:
+      return float(max(
+        self._FOLLOW_GAP_MIN_S,
+        min(
+          self._FOLLOW_GAP_MAX_S,
+          self._FOLLOW_GAP_MIN_S + (round(raw_gap) - 1.0) * self._FOLLOW_GAP_STALK_STEP_S,
+        ),
+      ))
+
+    if 0.8 <= raw_gap <= 4.5:
+      return float(max(self._FOLLOW_GAP_MIN_S, min(self._FOLLOW_GAP_MAX_S, raw_gap)))
+
+    return float(self._FOLLOW_GAP_DEFAULT_S)
+
+
   def _set_arbitration_state(self, *, state: str, now_ms: int) -> None:
     if str(self._arbitration_state) != str(state):
       self._arbitration_state = str(state)
@@ -2428,6 +2487,14 @@ class LongController:
       return None, "no_curve_target"
 
     target_ms = float(min(curve_candidates))
+    comfort_bias_ms = float(self._CURVE_CONFIRMED_COMFORT_BIAS_MS)
+    if (
+      raw_map_ms is not None
+      and raw_vision_ms is not None
+      and float(raw_vision_ms) > (float(raw_map_ms) + float(self._ARBITRATION_CURVE_MAP_VISION_DISAGREE_MS))
+    ):
+      comfort_bias_ms += float(self._CURVE_MAPD_VISION_DISAGREE_EXTRA_BIAS_MS)
+    target_ms = min(float(reference_ms), float(target_ms) + float(comfort_bias_ms))
     if float(target_ms) > (float(reference_ms) - float(self._ARBITRATION_CURVE_MIN_DROP_MS)):
       return None, "curve_too_small"
     if float(target_ms) > (float(v_ego_ms) - float(self._ARBITRATION_CURVE_EGO_DROP_MS)) and not steer_busy:
@@ -2461,6 +2528,16 @@ class LongController:
       and abs(float(self._lead_yrel)) < float(self._LEAD_OFFLANE_YREL_M)
     )
     lead_time_gap_s = float(self._lead_drel) / max(float(v_ego_ms), 0.1) if live_lead else 99.0
+    desired_follow_s = self._desired_follow_time_s(cs_out)
+    lead_critical_gap_s = min(
+      float(self._ARBITRATION_LEAD_CRITICAL_TIME_GAP_S),
+      max(1.05, float(desired_follow_s) - 0.85),
+    )
+    lead_follow_gap_s = max(float(self._ARBITRATION_LEAD_FOLLOW_TIME_GAP_S), float(desired_follow_s))
+    lead_release_gap_s = min(
+      float(self._FOLLOW_GAP_MAX_S) + 0.75,
+      float(desired_follow_s) + float(self._FOLLOW_GAP_RELEASE_HYSTERESIS_S),
+    )
     lead_opening_clear = bool(
       live_lead
       and self._lead_is_opening_clear(base_target_ms=float(reference_ms), v_ego_ms=float(v_ego_ms))
@@ -2506,7 +2583,7 @@ class LongController:
       live_lead
       and not lead_opening_clear
       and (
-        lead_time_gap_s <= float(self._ARBITRATION_LEAD_CRITICAL_TIME_GAP_S)
+        lead_time_gap_s <= float(lead_critical_gap_s)
         or (
           lead_closing
           and planner_below_reference
@@ -2521,8 +2598,25 @@ class LongController:
       and (
         lead_critical
         or lead_closing
-        or lead_time_gap_s <= float(self._ARBITRATION_LEAD_FOLLOW_TIME_GAP_S)
-        or planner_lead_valid
+        or lead_time_gap_s <= float(lead_follow_gap_s)
+        or (
+          planner_lead_valid
+          and (
+            planner_below_reference
+            or lead_time_gap_s <= float(lead_release_gap_s)
+          )
+        )
+      )
+    )
+    lead_clear_for_recovery = bool(
+      live_lead
+      and not lead_closing
+      and (
+        lead_time_gap_s >= float(lead_release_gap_s)
+        or (
+          lead_opening_clear
+          and float(self._lead_vrel) >= float(self._FOLLOW_GAP_RELEASE_VREL_MS)
+        )
       )
     )
 
@@ -2619,6 +2713,17 @@ class LongController:
     if no_live_lead:
       self._reset_lead_hold()
       self._reset_lead_curve_hold()
+      stale_clear_owner = bool(
+        "planner[lead" in out_src
+        or "lead_hold" in out_src
+        or "lead_guard" in out_src
+        or "lead_present_hold" in out_src
+        or "lead_curve_hold" in out_src
+        or stale_planner_lead
+      )
+      if stale_clear_owner and float(out_ms) < (float(reference_ms) - float(self._CLEAR_NO_LEAD_STALE_OWNER_DROP_MS)):
+        out_ms = max(float(out_ms), min(float(reference_ms), max(float(current_set_ms), float(v_ego_ms))))
+        out_src = f"{out_src}+stale_clear_release"
       if "map_only_unconfirmed" in curve_source:
         self._reset_curve_hold()
         self._mapd_stale_block_until_ms = int(now_ms) + int(self._MAPD_STRAIGHT_STALE_BLOCK_MS)
@@ -2628,8 +2733,22 @@ class LongController:
       self._arbitration_curve_target_ms = 0.0
       return float(out_ms), out_src
 
-    self._set_arbitration_state(state="RECOVERY", now_ms=int(now_ms))
-    return float(out_ms), f"{out_src}+state[RECOVERY]"
+    if lead_clear_for_recovery:
+      self._reset_lead_hold()
+      self._reset_lead_curve_hold()
+      self._set_arbitration_state(state="CRUISE_SYNC", now_ms=int(now_ms))
+      self._arbitration_curve_target_ms = 0.0
+      if (
+        ("planner[lead" in out_src or "lead_hold" in out_src or "lead_guard" in out_src)
+        and float(out_ms) < (float(reference_ms) - float(self._CLEAR_NO_LEAD_STALE_OWNER_DROP_MS))
+      ):
+        out_ms = max(float(out_ms), min(float(reference_ms), max(float(current_set_ms), float(v_ego_ms))))
+        out_src = f"{out_src}+lead_gap_release"
+      return float(out_ms), f"{out_src}+state[CRUISE_SYNC]+lead_release[g={lead_time_gap_s:.1f}/tf={desired_follow_s:.1f}]"
+
+    self._set_arbitration_state(state="LEAD_FOLLOW", now_ms=int(now_ms))
+    out_ms = min(float(out_ms), max(0.0, float(current_set_ms) if float(current_set_ms) > 0.1 else float(v_ego_ms)))
+    return float(out_ms), f"{out_src}+state[LEAD_FOLLOW_HOLD:g={lead_time_gap_s:.1f}/tf={desired_follow_s:.1f}]"
 
 
   def _planner_drag_reasons(self, *, now_ms: int, base_target_ms: float, planner_ms: float, current_set_ms: float, v_ego_ms: float) -> list[str]:
