@@ -80,6 +80,18 @@ def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
   else:
     raise NotImplementedError("Longitudinal personality not supported")
 
+def get_t_follow_from_carstate(carstate, personality=log.LongitudinalPersonality.standard):
+  follow_distance_s = 255
+  if carstate is not None:
+    try:
+      follow_distance_s = int(getattr(carstate, "followDistanceS", 255))
+    except (TypeError, ValueError):
+      follow_distance_s = 255
+  if 0 <= follow_distance_s <= 6:
+    return 0.7 + float(follow_distance_s) * 0.2
+  return get_T_FOLLOW(personality)
+
+
 def get_stopped_equivalence_factor(v_lead):
   return (v_lead**2) / (2 * COMFORT_BRAKE)
 
@@ -313,8 +325,8 @@ class LongitudinalMpc:
     lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau)
     return lead_xv
 
-  def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard):
-    t_follow = get_T_FOLLOW(personality)
+  def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard, carstate=None):
+    t_follow = get_t_follow_from_carstate(carstate, personality)
     v_ego = self.x0[1]
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 

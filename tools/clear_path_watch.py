@@ -190,6 +190,7 @@ def _car_state_summary(cs: Any) -> dict[str, Any]:
     "speedLimitOffset": _safe_float(_maybe_attr(cs, "speedLimitOffset", 0.0)),
     "cruiseButtons": _safe_int(_maybe_attr(cs, "cruiseButtons", 0), 0),
     "cruiseButtonsCounter": _safe_int(_maybe_attr(cs, "cruiseButtonsCounter", 0), 0),
+    "followDistanceS": _safe_int(_maybe_attr(cs, "followDistanceS", 255), 255),
     "followDistance": _safe_float(_maybe_attr(cs, "followDistance", 0.0)),
     "cruiseGap": _safe_float(_maybe_attr(cs, "cruiseGap", 0.0)),
     "distanceSetting": _safe_float(_maybe_attr(cs, "distanceSetting", 0.0)),
@@ -349,6 +350,7 @@ def _follow_gap_summary(car: dict[str, Any], plan: dict[str, Any], lead1: dict[s
   actual_gap_s = d_rel / max(v_ego, 0.1) if d_rel > 0.1 and v_ego > 0.1 else 0.0
 
   raw_candidates = {
+    "followDistanceS": float(_safe_int(car.get("followDistanceS"), 255)) if 0 <= _safe_int(car.get("followDistanceS"), 255) <= 6 else 0.0,
     "followDistance": _safe_float(car.get("followDistance"), 0.0),
     "cruiseGap": _safe_float(car.get("cruiseGap"), 0.0),
     "distanceSetting": _safe_float(car.get("distanceSetting"), 0.0),
@@ -390,13 +392,18 @@ def _follow_gap_summary(car: dict[str, Any], plan: dict[str, Any], lead1: dict[s
   if isinstance(cruise, dict):
     for key, value in (cruise.get("rawGapFields") or {}).items():
       raw_candidates[f"cruiseState.raw.{key}"] = _safe_float(value, 0.0)
+  follow_s = _safe_int(car.get("followDistanceS"), 255)
   active_name = ""
   stalk_gap = 0.0
-  for name, value in raw_candidates.items():
-    if abs(float(value)) > 0.001:
-      active_name = str(name)
-      stalk_gap = float(value)
-      break
+  if 0 <= follow_s <= 6:
+    active_name = "followDistanceS"
+    stalk_gap = float(follow_s)
+  else:
+    for name, value in raw_candidates.items():
+      if abs(float(value)) > 0.001:
+        active_name = str(name)
+        stalk_gap = float(value)
+        break
 
   button_events = car.get("buttonEvents", []) if isinstance(car.get("buttonEvents"), list) else []
   gap_button_events = [
@@ -408,6 +415,7 @@ def _follow_gap_summary(car: dict[str, Any], plan: dict[str, Any], lead1: dict[s
     "desiredTF": _safe_float(plan.get("desiredTF"), 0.0),
     "actualGapS": actual_gap_s,
     "dRel": d_rel,
+    "followS": follow_s,
     "stalkGap": stalk_gap,
     "stalkGapField": active_name,
     "rawCandidates": raw_candidates,
@@ -682,6 +690,7 @@ def _write_summary_line(txt_f, record: dict[str, Any]) -> None:
     f"toggles={_safe_int(flap.get('presenceToggles', 0))} "
     f"gapS={_safe_float(follow.get('actualGapS'), 0.0):.2f} "
     f"desiredTF={_safe_float(follow.get('desiredTF'), 0.0):.2f} "
+    f"followS={_safe_int(follow.get('followS'), 255)} "
     f"stalkGap={_safe_float(follow.get('stalkGap'), 0.0):.1f} "
     f"stalkField={_safe_str(follow.get('stalkGapField'), '-') or '-'} "
     f"gapBtn={','.join(_safe_str(e.get('type'), '') for e in (follow.get('gapButtonEvents') or [])[-2:]) or '-'} "

@@ -7,7 +7,7 @@ making lead-follow recovery smoother and less sticky:
 
 v61 adds an explicit final LONG arbitration state machine.
 
-v63 tightens far-lead release, hard-entry/roundabout caps, and steering-saturation response.
+v64 ports stalk follow distance timing, restores far-lead release, and hardens roundabout/curve caps.
 
 - lead critical / lead follow / curve pre-entry / curve active / curve exit / cruise sync are resolved in one final pass
 - stale lead/planner ownership is expired before it can hold speed down after curves
@@ -243,25 +243,30 @@ class LongController:
   _ARBITRATION_CURVE_EXIT_RELEASE_MS = 650
   _ARBITRATION_CURVE_ENTRY_STEP_MS = 2.2 * CV.MPH_TO_MS
   _ARBITRATION_CURVE_EXIT_STEP_MS = 3.6 * CV.MPH_TO_MS
-  _FOLLOW_GAP_DEFAULT_S = 2.35
-  _FOLLOW_GAP_MIN_S = 1.25
-  _FOLLOW_GAP_MAX_S = 3.35
-  _FOLLOW_GAP_STALK_STEP_S = 0.35
-  _FOLLOW_GAP_RELEASE_HYSTERESIS_S = 0.85
-  _FOLLOW_GAP_RELEASE_VREL_MS = 0.10
+  _FOLLOW_GAP_DEFAULT_S = 1.30
+  _FOLLOW_GAP_MIN_S = 0.70
+  _FOLLOW_GAP_MAX_S = 1.90
+  _FOLLOW_GAP_STALK_STEP_S = 0.20
+  _FOLLOW_GAP_RELEASE_HYSTERESIS_S = 0.55
+  _FOLLOW_GAP_RELEASE_VREL_MS = -0.20
   _CURVE_CONFIRMED_COMFORT_BIAS_MS = 2.0 * CV.MPH_TO_MS
   _CURVE_MAPD_VISION_DISAGREE_EXTRA_BIAS_MS = 1.25 * CV.MPH_TO_MS
   _CLEAR_NO_LEAD_STALE_OWNER_DROP_MS = 1.0 * CV.MPH_TO_MS
-  _FAR_LEAD_RELEASE_MIN_GAP_S = 4.20
-  _FAR_LEAD_RELEASE_MARGIN_S = 1.80
-  _FAR_LEAD_RELEASE_MIN_DREL_M = 48.0
-  _FAR_LEAD_RELEASE_MAX_CLOSING_MS = -0.45
-  _FAR_LEAD_RELEASE_MAX_DECEL_MS2 = -0.45
-  _ROUNDABOUT_HARD_ENTRY_CAP_MS = 33.0 * CV.MPH_TO_MS
-  _ROUNDABOUT_HARD_ENTRY_MIN_EGO_MS = 28.0 * CV.MPH_TO_MS
-  _LAT_SAT_HARD_CAP_MS = 26.0 * CV.MPH_TO_MS
-  _LAT_SAT_HARD_DROP_MS = 5.0 * CV.MPH_TO_MS
-  _LAT_SAT_HARD_MIN_SPEED_MS = 22.0 * CV.MPH_TO_MS
+  _FAR_LEAD_RELEASE_MIN_GAP_S = 3.10
+  _FAR_LEAD_RELEASE_MARGIN_S = 0.85
+  _FAR_LEAD_RELEASE_MIN_DREL_M = 36.0
+  _FAR_LEAD_RELEASE_MAX_CLOSING_MS = -0.85
+  _FAR_LEAD_RELEASE_MAX_DECEL_MS2 = -0.90
+  _FAR_LEAD_STRONG_CLOSING_MS = -1.15
+  _FAR_LEAD_STRONG_DECEL_MS2 = -1.10
+  _ROUNDABOUT_HARD_ENTRY_CAP_MS = 31.0 * CV.MPH_TO_MS
+  _ROUNDABOUT_HARD_ENTRY_MIN_EGO_MS = 24.0 * CV.MPH_TO_MS
+  _ROUNDABOUT_MAP_ONLY_MAX_EGO_MS = 48.0 * CV.MPH_TO_MS
+  _ROUNDABOUT_MAP_ONLY_MAX_TARGET_MS = 34.0 * CV.MPH_TO_MS
+  _ROUNDABOUT_MAP_ONLY_MIN_DROP_MS = 5.0 * CV.MPH_TO_MS
+  _LAT_SAT_HARD_CAP_MS = 25.0 * CV.MPH_TO_MS
+  _LAT_SAT_HARD_DROP_MS = 6.5 * CV.MPH_TO_MS
+  _LAT_SAT_HARD_MIN_SPEED_MS = 20.0 * CV.MPH_TO_MS
 
 
   _LEAD_CLOSE_CANCEL_MIN_SPEED_MS = 5.0 * CV.MPH_TO_MS
@@ -2419,20 +2424,28 @@ class LongController:
 
 
   def _desired_follow_time_s(self, cs_out) -> float:
+    follow_distance_s = 255
+    try:
+      follow_distance_s = int(getattr(cs_out, "followDistanceS", 255))
+    except Exception:
+      follow_distance_s = 255
+    if 0 <= int(follow_distance_s) <= 6:
+      return float(0.7 + (float(follow_distance_s) * 0.2))
+
     raw_gap = self._raw_follow_gap_value(cs_out)
     if raw_gap <= 0.01:
       return float(self._FOLLOW_GAP_DEFAULT_S)
 
-    if 1.0 <= raw_gap <= 7.0 and abs(raw_gap - round(raw_gap)) < 0.05:
+    if 0.0 <= raw_gap <= 6.0 and abs(raw_gap - round(raw_gap)) < 0.05:
       return float(max(
         self._FOLLOW_GAP_MIN_S,
         min(
           self._FOLLOW_GAP_MAX_S,
-          self._FOLLOW_GAP_MIN_S + (round(raw_gap) - 1.0) * self._FOLLOW_GAP_STALK_STEP_S,
+          0.7 + round(raw_gap) * self._FOLLOW_GAP_STALK_STEP_S,
         ),
       ))
 
-    if 0.8 <= raw_gap <= 4.5:
+    if 0.6 <= raw_gap <= 2.5:
       return float(max(self._FOLLOW_GAP_MIN_S, min(self._FOLLOW_GAP_MAX_S, raw_gap)))
 
     return float(self._FOLLOW_GAP_DEFAULT_S)
@@ -2487,7 +2500,7 @@ class LongController:
     )
 
     if not (planner_curve_active or map_supports or vision_supports):
-      if bool(self._lat_limit_saturated) and float(v_ego_ms) > float(self._LAT_SAT_HARD_MIN_SPEED_MS):
+      if (bool(self._lat_limit_saturated) or bool(steer_busy)) and float(v_ego_ms) > float(self._LAT_SAT_HARD_MIN_SPEED_MS):
         lat_target_ms = max(
           float(self.MIN_CRUISE_SPEED_MS),
           min(
@@ -2495,7 +2508,8 @@ class LongController:
             float(v_ego_ms) - float(self._LAT_SAT_HARD_DROP_MS),
           ),
         )
-        return float(lat_target_ms), "lat_sat"
+        lat_reason = "lat_sat" if bool(self._lat_limit_saturated) else "steer_busy_hard"
+        return float(lat_target_ms), lat_reason
       return None, "no_curve"
 
     map_only_low = bool(
@@ -2506,8 +2520,22 @@ class LongController:
         or float(raw_vision_ms) > (float(raw_map_ms) + float(self._ARBITRATION_CURVE_MAP_VISION_DISAGREE_MS))
       )
     )
+    map_only_roundabout = bool(
+      map_only_low
+      and raw_map_ms is not None
+      and float(v_ego_ms) <= float(self._ROUNDABOUT_MAP_ONLY_MAX_EGO_MS)
+      and float(raw_map_ms) <= float(self._ROUNDABOUT_MAP_ONLY_MAX_TARGET_MS)
+      and float(raw_map_ms) <= (float(reference_ms) - float(self._ROUNDABOUT_MAP_ONLY_MIN_DROP_MS))
+      and float(raw_map_ms) <= (float(v_ego_ms) - float(self._ARBITRATION_CURVE_EGO_DROP_MS))
+    )
 
-    if map_only_low and not (planner_curve_active or steer_busy or bool(self._lat_limit_saturated) or bool(live_lead_context)):
+    if map_only_low and not (
+      planner_curve_active
+      or steer_busy
+      or bool(self._lat_limit_saturated)
+      or bool(live_lead_context)
+      or bool(map_only_roundabout)
+    ):
       return None, "map_only_unconfirmed"
 
     curve_candidates: list[float] = []
@@ -2528,12 +2556,18 @@ class LongController:
       curve_candidates.append(float(curve_specific_ms))
       owner_parts.append("mapd_comfort" if bool(self._mapd_comfort_bias_active) else "mapd")
 
+    if bool(map_only_roundabout) and raw_map_ms is not None:
+      curve_candidates.append(float(raw_map_ms) + float(self._CURVE_FORCE_ENTRY_TARGET_OFFSET_MS))
+      owner_parts.append("mapd_roundabout")
+
     if not curve_candidates:
       return None, "no_curve_target"
 
     target_ms = float(min(curve_candidates))
     comfort_bias_ms = float(self._CURVE_CONFIRMED_COMFORT_BIAS_MS)
-    if (
+    if bool(map_only_roundabout):
+      comfort_bias_ms = min(float(comfort_bias_ms), 0.50 * CV.MPH_TO_MS)
+    elif (
       raw_map_ms is not None
       and raw_vision_ms is not None
       and float(raw_vision_ms) > (float(raw_map_ms) + float(self._ARBITRATION_CURVE_MAP_VISION_DISAGREE_MS))
@@ -2597,8 +2631,8 @@ class LongController:
     strong_lead_closing = bool(
       live_lead
       and (
-        float(self._lead_vrel) <= -0.75
-        or float(self._lp_a_target) <= -0.75
+        float(self._lead_vrel) <= float(self._FAR_LEAD_STRONG_CLOSING_MS)
+        or float(self._lp_a_target) <= float(self._FAR_LEAD_STRONG_DECEL_MS2)
       )
     )
     far_lead_release_gap_s = max(
@@ -2750,7 +2784,11 @@ class LongController:
       previous_curve_ms = float(self._arbitration_curve_target_ms) if float(self._arbitration_curve_target_ms) > 0.1 else float(out_ms)
       self._set_arbitration_state(state=state, now_ms=int(now_ms))
       target_ms = max(float(self.MIN_CRUISE_SPEED_MS), float(curve_candidate_ms))
-      hard_entry_context = bool("hard_entry" in out_src or "curve_pre_entry(hard)" in out_src)
+      hard_entry_context = bool(
+        "hard_entry" in out_src
+        or "curve_pre_entry(hard)" in out_src
+        or "mapd_roundabout" in str(curve_source)
+      )
       if bool(hard_entry_context) and float(v_ego_ms) >= float(self._ROUNDABOUT_HARD_ENTRY_MIN_EGO_MS):
         capped_target_ms = min(float(target_ms), float(self._ROUNDABOUT_HARD_ENTRY_CAP_MS))
         if float(capped_target_ms) < float(target_ms):
@@ -2759,7 +2797,9 @@ class LongController:
 
       lat_sat_context = bool(
         bool(self._lat_limit_saturated)
+        or bool(self._steer_busy_for_curve(current_angle_deg=float(current_angle_deg), steering_rate_deg=float(steering_rate_deg)))
         or "lat_sat" in out_src
+        or "steer_busy_hard" in str(curve_source)
         or "curve_steer_limit_hold" in out_src
         or "lat_sat" in str(curve_source)
       )
@@ -2820,11 +2860,27 @@ class LongController:
       if stale_clear_owner and float(out_ms) < (float(reference_ms) - float(self._CLEAR_NO_LEAD_STALE_OWNER_DROP_MS)):
         out_ms = max(float(out_ms), min(float(reference_ms), max(float(current_set_ms), float(v_ego_ms))))
         out_src = f"{out_src}+stale_clear_release"
-      if "map_only_unconfirmed" in curve_source:
+      existing_curve_owner = any(
+        token in str(out_src)
+        for token in (
+          "curve_hold",
+          "curve_pre_entry",
+          "lp_near[",
+          "mapd_cap",
+          "force_entry",
+          "curve_accel_block",
+          "curve_steer_limit_hold",
+          "roundabout_cap",
+          "lat_sat_hard_cap",
+        )
+      )
+      if "map_only_unconfirmed" in curve_source and not existing_curve_owner:
         self._reset_curve_hold()
         self._mapd_stale_block_until_ms = int(now_ms) + int(self._MAPD_STRAIGHT_STALE_BLOCK_MS)
         out_ms = max(float(out_ms), min(float(reference_ms), max(float(current_set_ms), float(v_ego_ms))))
         out_src = f"{out_src}+state[CRUISE_SYNC]+map_only_unconfirmed"
+      elif "map_only_unconfirmed" in curve_source:
+        out_src = f"{out_src}+state[CURVE_KEEP]+map_only_unconfirmed"
       self._set_arbitration_state(state="CRUISE_SYNC", now_ms=int(now_ms))
       self._arbitration_curve_target_ms = 0.0
       return float(out_ms), out_src
