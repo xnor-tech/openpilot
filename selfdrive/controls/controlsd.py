@@ -65,6 +65,7 @@ class Controls(ControlsExt):
       self.LaC = LatControlTorque(self.CP, self.CP_SP, self.CI, DT_CTRL)
 
     self.LaC = ControlsExt.initialize_lateral_control(self, self.LaC, self.CI, DT_CTRL)
+    ControlsExt.initialize_secondary_lateral_control(self, self.CI, DT_CTRL)  # fork: secondary lateral controller (opt-in via CarInterface)
 
   def update(self):
     self.sm.update(15)
@@ -148,6 +149,7 @@ class Controls(ControlsExt):
                                                        self.calibrated_pose, curvature_limited, lat_delay)
     actuators.torque = float(steer)
     actuators.steeringAngleDeg = float(steeringAngleDeg)
+    ControlsExt.update_secondary_lateral_control(self, CC, actuators, lp, lat_delay, curvature_limited)  # fork: secondary lateral controller (opt-in via CarInterface)
     # Ensure no NaNs/Infs
     for p in ACTUATOR_FIELDS:
       attr = getattr(actuators, p)

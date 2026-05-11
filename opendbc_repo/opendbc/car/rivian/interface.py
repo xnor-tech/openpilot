@@ -12,6 +12,11 @@ class CarInterface(CarInterfaceBase):
   CarController = CarController
   RadarInterface = RadarInterface
 
+  def build_secondary_lateral_controller(self, CP_SP, dt):
+    # cooperative torque alongside the primary angle path (handoff / driver override)
+    from opendbc.car.rivian.ext_controller import build_torque_controller
+    return build_torque_controller(self.CP, CP_SP, self, dt)
+
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
     ret.brand = "rivian"
@@ -22,11 +27,15 @@ class CarInterface(CarInterfaceBase):
     if 0x321 not in fingerprint[0]:
       ret.flags |= RivianFlags.GEN2.value
 
-    ret.steerActuatorDelay = 0.15
-    ret.steerLimitTimer = 0.4
-    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    # no angle upgrade installed
+    if 0x1310 not in fingerprint[1]:
+      ret.dashcamOnly = True
 
-    ret.steerControlType = structs.CarParams.SteerControlType.torque
+    ret.steerActuatorDelay = 0.3
+    ret.steerAtStandstill = True
+    ret.steerLimitTimer = 0.4
+
+    ret.steerControlType = structs.CarParams.SteerControlType.angle
     ret.radarUnavailable = True
 
     # TODO: pending finding/handling missing set speed
@@ -35,9 +44,17 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
       ret.safetyConfigs[0].safetyParam |= RivianSafetyFlags.LONG_CONTROL.value
 
-    ret.longitudinalActuatorDelay = 0.35
-    ret.vEgoStopping = 0.25
-    ret.stopAccel = 0
+    # VDM jerk limits: 1.8 m/s³ accel, 2.0 m/s³ decel
+    # VDM filters: 12Hz + 22Hz cascaded IIR (Butterworth)
+    # Effective delay to 63% of step: ~400-500ms
+    ret.longitudinalActuatorDelay = 0.5
+    # VDM creep_decel = -0.08 m/s² (holds car at stop)
+    ret.stopAccel = -0.08
+    # VDM stopping_speed threshold = 0.5 m/s
+    ret.vEgoStopping = 0.5
+    ret.vEgoStarting = 0.5
+    # VDM decel rate during stopping: coast_decel = -0.3, jerk = 3.0 m/s³
+    ret.stoppingDecelRate = 0.8
 
     return ret
 
