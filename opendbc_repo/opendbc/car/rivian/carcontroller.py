@@ -17,7 +17,7 @@ class CarController(CarControllerBase, MadsCarController):
     self.packer = CANPacker(dbc_names[Bus.pt])
 
     self.cancel_frames = 0
-    self.erc = ExternalController(CP)
+    self.erc = ExternalController(CP, CP_SP)
 
   def update(self, CC, CC_SP, CS, now_nanos):
     MadsCarController.update(self, CC, CC_SP, CS)

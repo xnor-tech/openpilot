@@ -2,9 +2,11 @@ import copy
 from opendbc.can import CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.interfaces import CarStateBase
+from opendbc.car.rivian.ext_controller import TorsionDetector
 from opendbc.car.rivian.values import DBC, GEAR_MAP, RivianFlags
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.sunnypilot.car.rivian.carstate_ext import CarStateExt
+from opendbc.sunnypilot.car.rivian.values import RivianFlagsSP
 
 GearShifter = structs.CarState.GearShifter
 
@@ -21,6 +23,9 @@ class CarState(CarStateBase, CarStateExt):
     self.hands_on_level = 0
     self.eac_status = 0
     self.eac_error_code = 0
+    self.coop_steering = bool(CP_SP.flags & RivianFlagsSP.COOP_STEERING)
+    # without cooperative steering, disengage on driver torque well before EPAS reports an override
+    self.torsion_disengage = TorsionDetector(3.0, 9)
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
@@ -111,6 +116,10 @@ class CarState(CarStateBase, CarStateExt):
     self.eac_error_code = int(cp.vl["EPAS_AdasStatus"]["EPAS_EacErrorCode"])
     self.eac_status = int(cp.vl["EPAS_AdasStatus"]["EPAS_EacStatus"])
     self.hands_on_level = int(cp.vl["EPAS_SystemStatus"]["EPAS_HandsOnLevel"])
+
+    if not self.coop_steering:
+      torsion = self.torsion_disengage.update(ret.steeringTorque)
+      ret.steeringDisengage = ret.steeringDisengage or self.hands_on_level > 1 or torsion
 
     CarStateExt.update(self, ret, can_parsers)
 

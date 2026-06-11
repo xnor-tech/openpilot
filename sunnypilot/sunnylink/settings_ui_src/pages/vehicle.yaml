@@ -27,6 +27,17 @@ sections:
     enablement:
     - $ref: '#/macros/offroad'
     - $ref: '#/macros/longitudinal'
+- id: rivian
+  title: Rivian Settings
+  description: ''
+  items:
+  - key: RivianCoopSteering
+    widget: toggle
+    title: Cooperative Steering
+    description: Allows the driver to provide steering input while openpilot is engaged. When disabled, steering input from
+      the driver disengages lateral control.
+    enablement:
+    - $ref: '#/macros/offroad'
 - id: subaru
   title: Subaru Settings
   description: ''
