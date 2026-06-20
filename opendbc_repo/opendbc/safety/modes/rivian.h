@@ -77,6 +77,14 @@ static void rivian_rx_hook(const CANPacket_t *msg) {
       update_sample(&torque_driver, torque_driver_new);
     }
 
+    // Measured steering angle from EPAS (EPAS_AdasStatus)
+    if (msg->addr == 0x390U) {
+      // EPAS_InternalSas: 47|14@0+ (0.1,-819.2) deg
+      // Stored as degrees * 10 to match angle_deg_to_can
+      int angle_meas_new = ((msg->data[5] << 6) | (msg->data[6] >> 2)) - 8192U;
+      update_sample(&angle_meas, angle_meas_new);
+    }
+
     // Brake pressed
     if (msg->addr == 0x38fU) {
       brake_pressed = (msg->data[2] >> 7) & 1U;
@@ -93,7 +101,18 @@ static void rivian_rx_hook(const CANPacket_t *msg) {
 }
 
 static bool rivian_tx_hook(const CANPacket_t *msg) {
-  // Rivian utilizes more torque at low speed to maintain the same lateral accel
+  const AngleSteeringLimits RIVIAN_ANGLE_STEERING_LIMITS = {
+    .max_angle = 5000,  // 500 deg
+    .angle_deg_to_can = 10,
+    .frequency = 100U,
+  };
+
+  const AngleSteeringParams RIVIAN_ANGLE_STEERING_PARAMS = {
+    .slip_factor = -0.0005445721739802007,
+    .steer_ratio = 15.2,
+    .wheelbase = 3.08,
+  };
+
   const TorqueSteeringLimits RIVIAN_STEERING_LIMITS = {
     .max_torque = 350,
     .dynamic_max_torque = true,
@@ -118,7 +137,17 @@ static bool rivian_tx_hook(const CANPacket_t *msg) {
   bool tx = true;
 
   if (msg->bus == 0U) {
-    // Steering control
+    // Angle steering control
+    if (msg->addr == 0x110U) {
+      int desired_angle = ((msg->data[2] << 7) | (msg->data[3] >> 1)) - 16384U;
+      bool lka_active = GET_BIT(msg, 12U);
+
+      if (steer_angle_cmd_checks_vm(desired_angle, lka_active, RIVIAN_ANGLE_STEERING_LIMITS, RIVIAN_ANGLE_STEERING_PARAMS)) {
+        tx = false;
+      }
+    }
+
+    // Torque steering control (cooperative override)
     if (msg->addr == 0x120U) {
       int desired_torque = ((msg->data[2] << 3U) | (msg->data[3] >> 5U)) - 1024U;
       bool steer_req = (msg->data[3] >> 4) & 1U;
@@ -143,15 +172,16 @@ static bool rivian_tx_hook(const CANPacket_t *msg) {
 static safety_config rivian_init(uint16_t param) {
   // SCCM_WheelTouch: for hiding hold wheel alert
   // VDM_AdasSts: for canceling stock ACC
-  // 0x120 = ACM_lkaHbaCmd, 0x321 = SCCM_WheelTouch, 0x162 = VDM_AdasSts
-  static const CanMsg RIVIAN_TX_MSGS[] = {{0x120, 0, 8, .check_relay = true}, {0x321, 2, 7, .check_relay = true}, {0x162, 2, 8, .check_relay = true}};
+  // 0x100 = ACM_Status, 0x110 = ACM_SteeringControl, 0x120 = ACM_lkaHbaCmd, 0x321 = SCCM_WheelTouch, 0x162 = VDM_AdasSts
+  static const CanMsg RIVIAN_TX_MSGS[] = {{0x100, 0, 8, .check_relay = true}, {0x110, 0, 8, .check_relay = true}, {0x120, 0, 8, .check_relay = true}, {0x321, 2, 7, .check_relay = true}, {0x162, 2, 8, .check_relay = true}};
   // 0x160 = ACM_longitudinalRequest
-  static const CanMsg RIVIAN_LONG_TX_MSGS[] = {{0x120, 0, 8, .check_relay = true}, {0x321, 2, 7, .check_relay = true}, {0x160, 0, 5, .check_relay = true}};
+  static const CanMsg RIVIAN_LONG_TX_MSGS[] = {{0x100, 0, 8, .check_relay = true}, {0x110, 0, 8, .check_relay = true}, {0x120, 0, 8, .check_relay = true}, {0x321, 2, 7, .check_relay = true}, {0x160, 0, 5, .check_relay = true}};
 
   static RxCheck rivian_rx_checks[] = {
     {.msg = {{0x208, 0, 8, 50U, .max_counter = 14U}, { 0 }, { 0 }}},                                                             // ESP_Status (speed)
     {.msg = {{0x150, 0, 7, 50U, .max_counter = 14U}, { 0 }, { 0 }}},                                                             // VDM_PropStatus (gas pedal & 2nd speed)
     {.msg = {{0x380, 0, 5, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  // EPAS_SystemStatus (driver torque)
+    {.msg = {{0x390, 0, 7, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  // EPAS_AdasStatus (measured angle)
     {.msg = {{0x38f, 0, 6, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},   // iBESP2 (brakes)
     {.msg = {{0x100, 2, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  // ACM_Status (cruise state)
   };

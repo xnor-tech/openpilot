@@ -56,6 +56,28 @@ class ControlsExt(ModelStateBase):
 
       self._param_update_time = time.monotonic()
 
+  def initialize_secondary_lateral_control(self, CI, dt) -> None:
+    # opt-in: CarInterface may define build_secondary_lateral_controller
+    builder = getattr(CI, 'build_secondary_lateral_controller', None)
+    self.LaC_secondary = builder(self.CP_SP, dt) if builder is not None else None
+
+  def update_secondary_lateral_control(self, CC, actuators, lp, lat_delay, curvature_limited) -> None:
+    if getattr(self, 'LaC_secondary', None) is None:
+      return
+    sm = self.sm
+    if sm.all_checks(['liveTorqueParameters']) and sm['liveTorqueParameters'].useParams:
+      ltp = sm['liveTorqueParameters']
+      self.LaC_secondary.update_live_torque_params(ltp.latAccelFactorFiltered,
+                                                   ltp.latAccelOffsetFiltered,
+                                                   ltp.frictionCoefficientFiltered)
+    if not CC.latActive:
+      self.LaC_secondary.reset()
+      return
+    steer, _, _ = self.LaC_secondary.update(CC.latActive, sm['carState'], self.VM, lp,
+                                            self.steer_limited_by_safety, self.desired_curvature,
+                                            self.calibrated_pose, curvature_limited, lat_delay)
+    actuators.torque = float(steer)
+
   def get_lat_active(self, sm: messaging.SubMaster) -> bool:
     if self.blinker_pause_lateral.update(sm['carState']):
       return False

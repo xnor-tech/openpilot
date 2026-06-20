@@ -12,6 +12,11 @@ class CarInterface(CarInterfaceBase):
   CarController = CarController
   RadarInterface = RadarInterface
 
+  def build_secondary_lateral_controller(self, CP_SP, dt):
+    # cooperative torque alongside the primary angle path (handoff / driver override)
+    from opendbc.car.rivian.ext_controller import build_torque_controller
+    return build_torque_controller(self.CP, CP_SP, self, dt)
+
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
     ret.brand = "rivian"
@@ -22,11 +27,15 @@ class CarInterface(CarInterfaceBase):
     if 0x321 not in fingerprint[0]:
       ret.flags |= RivianFlags.GEN2.value
 
-    ret.steerActuatorDelay = 0.15
-    ret.steerLimitTimer = 0.4
-    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    # no angle upgrade installed
+    if 0x1310 not in fingerprint[1]:
+      ret.dashcamOnly = True
 
-    ret.steerControlType = structs.CarParams.SteerControlType.torque
+    ret.steerActuatorDelay = 0.1
+    ret.steerAtStandstill = True
+    ret.steerLimitTimer = 0.4
+
+    ret.steerControlType = structs.CarParams.SteerControlType.angle
     ret.radarUnavailable = True
 
     # TODO: pending finding/handling missing set speed
@@ -35,9 +44,11 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
       ret.safetyConfigs[0].safetyParam |= RivianSafetyFlags.LONG_CONTROL.value
 
-    ret.longitudinalActuatorDelay = 0.35
+    ret.longitudinalActuatorDelay = 0.2
+    ret.stopAccel = -0.2
     ret.vEgoStopping = 0.25
-    ret.stopAccel = 0
+    ret.longitudinalTuning.kiBP = [0.]
+    ret.longitudinalTuning.kiV = [0.2]
 
     return ret
 
