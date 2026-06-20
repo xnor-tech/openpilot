@@ -33,11 +33,25 @@ TORQUE_PARAMS_DEFAULTS = dict(latAccelFactor=2.8, latAccelOffset=0.0, friction=0
 
 
 def build_torque_controller(CP, CP_SP, CI, dt):
-  """Build openpilot's LatControlTorque for cars whose CP.lateralTuning isn't 'torque'."""
+  """Build the cooperative LatControlTorque for cars whose CP.lateralTuning isn't 'torque'."""
   from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+
+  class CooperativeTorque(LatControlTorque):
+    # only applied during override or the hands-off torque->angle handoff. while angle control steers, this
+    # output is discarded: it runs open-loop and the integrator rails (error never unwinds). reset it until
+    # needed so it stays sane and enters each use clean.
+    def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, calibrated_pose, curvature_limited, lat_delay):
+      if active and not CS.steeringPressed:
+        angle = math.degrees(VM.get_steer_from_curvature(-desired_curvature, CS.vEgo, params.roll)) + params.angleOffsetDeg
+        if abs(angle - CS.steeringAngleDeg) < 6.:  # deg; angle control is handling it
+          self.reset()
+          self.pid.reset()
+          return 0., 0., None
+      return super().update(active, CS, VM, params, steer_limited_by_safety, desired_curvature, calibrated_pose, curvature_limited, lat_delay)
+
   if CP.lateralTuning.which() == 'torque':
-    return LatControlTorque(CP, CP_SP, CI, dt)
-  return LatControlTorque(_with_torque_tuning(CP), CP_SP, CI, dt)
+    return CooperativeTorque(CP, CP_SP, CI, dt)
+  return CooperativeTorque(_with_torque_tuning(CP), CP_SP, CI, dt)
 
 
 def _with_torque_tuning(CP):
