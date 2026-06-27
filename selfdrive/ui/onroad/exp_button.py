@@ -20,6 +20,7 @@ class ExpButton(Widget):
 
     self._white_color: rl.Color = rl.Color(255, 255, 255, 255)
     self._black_bg: rl.Color = rl.Color(0, 0, 0, 166)
+    self.wheel_tint: rl.Color | None = None  # optional RGB tint for the button icon
     self._txt_wheel: rl.Texture = gui_app.texture('icons/chffr_wheel.png', icon_size, icon_size)
     self._txt_exp: rl.Texture = gui_app.texture('icons/experimental.png', icon_size, icon_size)
     self._rect = rl.Rectangle(0, 0, button_size, button_size)
@@ -49,8 +50,13 @@ class ExpButton(Widget):
     self._white_color.a = 180 if self.is_pressed or not self._engageable else 255
 
     texture = self._txt_exp if self._held_or_actual_mode() else self._txt_wheel
+
+    color = self._white_color
+    if self.wheel_tint is not None:
+      color = rl.Color(self.wheel_tint.r, self.wheel_tint.g, self.wheel_tint.b, self._white_color.a)
+
     rl.draw_circle(center_x, center_y, self._rect.width / 2, self._black_bg)
-    rl.draw_texture_ex(texture, rl.Vector2(center_x - texture.width / 2, center_y - texture.height / 2), 0.0, 1.0, self._white_color)
+    rl.draw_texture_ex(texture, rl.Vector2(center_x - texture.width / 2, center_y - texture.height / 2), 0.0, 1.0, color)
 
   def _held_or_actual_mode(self):
     now = time.monotonic()

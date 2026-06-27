@@ -8,6 +8,7 @@ import pyray as rl
 
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.sunnypilot.onroad.blind_spot_indicators import BlindSpotIndicators
+from openpilot.selfdrive.ui.sunnypilot.onroad.lateral_mode import lateral_mode
 
 
 class HudRendererSP(HudRenderer):
@@ -18,6 +19,8 @@ class HudRendererSP(HudRenderer):
   def _update_state(self) -> None:
     super()._update_state()
     self.blind_spot_indicators.update()
+    lateral_mode.update()
+    self.wheel_tint = lateral_mode.wheel_tint
 
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
