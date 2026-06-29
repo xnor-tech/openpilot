@@ -164,12 +164,17 @@ class TorqueBar(Widget):
     if self._demo:
       return
 
+    car_control = ui_state.sm['carControl']
+    applied_torque = ui_state.sm['carOutput'].actuatorsOutput.torque
+
     # torque line
-    if ui_state.sm['controlsState'].lateralControlState.which() == 'angleState':
+    # angle controlled cars command no torque, and neither does Rivian while it steers on its angle
+    # channel under torque primary. show the lateral accel estimate there instead of a flat zero bar
+    steering_by_angle = ui_state.sm['controlsState'].lateralControlState.which() == 'angleState'
+    if steering_by_angle or (car_control.latActive and abs(applied_torque) < 1e-3):
       controls_state = ui_state.sm['controlsState']
       car_state = ui_state.sm['carState']
       live_parameters = ui_state.sm['liveParameters']
-      car_control = ui_state.sm['carControl']
 
       # Include lateral accel error in estimated torque utilization
       actual_lateral_accel = controls_state.curvature * car_state.vEgo ** 2
@@ -187,7 +192,7 @@ class TorqueBar(Widget):
       else:
         self._torque_filter.update(np.clip((lateral_acceleration + accel_diff) / max_lateral_acceleration, -1, 1))
     else:
-      self._torque_filter.update(-ui_state.sm['carOutput'].actuatorsOutput.torque)
+      self._torque_filter.update(-applied_torque)
 
   def _render(self, rect: rl.Rectangle) -> None:
     # adjust y pos with torque

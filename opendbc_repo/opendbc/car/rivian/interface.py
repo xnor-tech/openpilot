@@ -22,10 +22,16 @@ class CarInterface(CarInterfaceBase):
     if 0x321 not in fingerprint[0]:
       ret.flags |= RivianFlags.GEN2.value
 
-    ret.steerActuatorDelay = 0.15
+    # no angle upgrade installed
+    if 0x1310 not in fingerprint[1]:
+      ret.dashcamOnly = True
+
+    ret.steerActuatorDelay = 0.1
+    ret.steerAtStandstill = True
     ret.steerLimitTimer = 0.4
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
+    # torque is the primary channel, ext_controller derives the angle from curvature
     ret.steerControlType = structs.CarParams.SteerControlType.torque
     ret.radarUnavailable = True
 
@@ -35,9 +41,11 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
       ret.safetyConfigs[0].safetyParam |= RivianSafetyFlags.LONG_CONTROL.value
 
-    ret.longitudinalActuatorDelay = 0.35
+    ret.longitudinalActuatorDelay = 0.2
+    ret.stopAccel = -0.2
     ret.vEgoStopping = 0.25
-    ret.stopAccel = 0
+    ret.longitudinalTuning.kiBP = [0.]
+    ret.longitudinalTuning.kiV = [0.2]
 
     return ret
 
