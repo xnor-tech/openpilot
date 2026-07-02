@@ -1,10 +1,11 @@
 from dataclasses import dataclass, field
 from enum import StrEnum, IntFlag
 
-from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, structs, uds
+from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, structs, uds, ACCELERATION_DUE_TO_GRAVITY
 from opendbc.car.docs_definitions import CarHarness, CarDocs, CarParts
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries, p16
 from opendbc.car.vin import Vin
+from opendbc.car.lateral import AngleSteeringLimitsVM, ISO_LATERAL_ACCEL
 
 
 class WMI(StrEnum):
@@ -114,6 +115,8 @@ GEAR_MAP = {
   4: structs.CarState.GearShifter.drive,
 }
 
+AVERAGE_ROAD_ROLL = 0.06  # ~3.4 degrees, 6% superelevation. higher actual roll lowers lateral acceleration
+
 
 class CarControllerParams:
   # The R1T 2023 and R1S 2023 we tested on achieves slightly more lateral acceleration going left vs. right
@@ -132,6 +135,15 @@ class CarControllerParams:
   STEER_DRIVER_ALLOWANCE = 100  # allowed driver torque before start limiting
   STEER_DRIVER_MULTIPLIER = 2  # weight driver torque
   STEER_DRIVER_FACTOR = 100
+
+  # master split AngleSteeringLimits into v1 (rate) + VM (lateral-accel); Rivian
+  # angle control uses the VM limiter (ext_controller.apply_steer_angle_limits_vm).
+  ANGLE_LIMITS: AngleSteeringLimitsVM = AngleSteeringLimitsVM(
+    500,  # deg, STEER_ANGLE_MAX
+    MAX_LATERAL_ACCEL=ISO_LATERAL_ACCEL + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),  # ~3.6 m/s^2
+    MAX_LATERAL_JERK=3.0 + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),  # ~3.6 m/s^3
+    MAX_ANGLE_RATE=2.5,  # deg/10ms frame
+  )
 
   ACCEL_MIN = -3.5  # m/s^2
   ACCEL_MAX = 2.0  # m/s^2

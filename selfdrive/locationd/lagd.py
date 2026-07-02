@@ -368,6 +368,9 @@ def retrieve_initial_lag(params: Params, CP: car.CarParams):
         if last_CP.carFingerprint != CP.carFingerprint:
           raise Exception("Car model mismatch")
 
+        if last_CP.steerControlType != CP.steerControlType:
+          raise Exception("Steer control type changed; discard stale lag")
+
         lag, valid_blocks, status = ld.lateralDelayEstimate, ld.validBlocks, ld.status
         assert valid_blocks <= BLOCK_NUM, "Invalid number of valid blocks"
         assert status != log.LiveDelayData.Status.invalid, "Lag estimate is invalid"
