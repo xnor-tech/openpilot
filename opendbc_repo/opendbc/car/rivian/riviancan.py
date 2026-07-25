@@ -23,7 +23,7 @@ def create_lka_steering(packer, frame, acm_lka_hba_cmd, apply_torque, enabled, a
   values |= {
     "ACM_lkaHbaCmd_Counter": frame % 15,
     "ACM_lkaStrToqReq": apply_torque,
-    "ACM_lkaActToi": mads.lat_active,
+    "ACM_lkaActToi": active,
 
     "ACM_lkaLaneRecogState": 3 if mads.lka_icon_states else 0,
     "ACM_lkaSymbolState": 3 if mads.lka_icon_states else 0,
@@ -41,6 +41,32 @@ def create_lka_steering(packer, frame, acm_lka_hba_cmd, apply_torque, enabled, a
   data = packer.make_can_msg("ACM_lkaHbaCmd", 0, values)[1]
   values["ACM_lkaHbaCmd_Checksum"] = checksum(data[1:], 0x1D, 0x63)
   return packer.make_can_msg("ACM_lkaHbaCmd", 0, values)
+
+
+def create_angle_steering(packer, frame, angle, active):
+  values = {
+    "ACM_SteeringControl_Counter": frame % 15,
+    "ACM_SteeringAngleRequest": angle,
+    "ACM_EacEnabled": active,
+    "ACM_HapticRequired": 0
+  }
+
+  data = packer.make_can_msg("ACM_SteeringControl", 0, values)[1]
+  values["ACM_SteeringControl_Checksum"] = checksum(data[1:], 0x1D, 0x41)
+  return packer.make_can_msg("ACM_SteeringControl", 0, values)
+
+def create_acm_status(packer, frame, feature_status):
+  values = {
+    "ACM_Status_Counter": frame % 15,
+    "ACM_FeatureStatus": feature_status,
+    "ACM_FaultStatus": 0,
+    "ACM_FaultSupervisorState": 0,
+    "ACM_Unkown1": 0,
+  }
+
+  data = packer.make_can_msg("ACM_Status", 0, values)[1]
+  values["ACM_Status_Checksum"] = checksum(data[1:], 0x1D, 0x5F)
+  return packer.make_can_msg("ACM_Status", 0, values)
 
 
 def create_wheel_touch(packer, sccm_wheel_touch, enabled):
@@ -92,6 +118,8 @@ def create_adas_status(packer, vdm_adas_status, interface_status):
   )}
 
   if interface_status is not None:
+    if interface_status == 1:
+      values["VDM_UserAdasRequest"] = 1
     values["VDM_AdasInterfaceStatus"] = interface_status
 
   data = packer.make_can_msg("VDM_AdasSts", 2, values)[1]
