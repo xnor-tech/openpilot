@@ -26,6 +26,9 @@ AddOption('--minimal',
           dest='extras',
           default=(not COMMA_HARDWARE and not release),
           help='the minimum build to run openpilot. no tests, tools, etc.')
+AddOption('--ubsan',
+          action='store_true',
+          help='turn on UBSan')
 
 submodule_python_paths = [
   Dir("#").abspath,

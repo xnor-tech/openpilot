@@ -17,6 +17,7 @@ from openpilot.common.utils import retry
 from openpilot.common.params import Params
 from openpilot.common.timeout import Timeout
 from openpilot.selfdrive.pandad import can_list_to_can_capnp
+from openpilot.system.hardware import TICI
 from openpilot.selfdrive.test.helpers import with_processes
 
 
@@ -26,7 +27,7 @@ def publish_device_state(pm, started):
   pm.send('deviceState', msg)
 
 @retry(attempts=3)
-def setup_pandad():
+def setup_pandad(num_pandas):
   params = Params()
   params.clear_all()
 
@@ -39,12 +40,16 @@ def setup_pandad():
       publish_device_state(pm, False)
       sm.update(100)
 
+  found_pandas = len(sm['pandaStates'])
+  assert num_pandas == found_pandas, "connected pandas ({found_pandas}) doesn't match expected panda count ({num_pandas}). \
+                                      connect another panda for multipanda tests."
+
   # pandad safety setting relies on these params
   cp = car.CarParams.new_message()
 
   safety_config = car.CarParams.SafetyConfig.new_message()
   safety_config.safetyModel = car.CarParams.SafetyModel.allOutput
-  cp.safetyConfigs = [safety_config]
+  cp.safetyConfigs = [safety_config]*num_pandas
 
   params.put_bool("FirmwareQueryDone", True, block=True)
   params.put_bool("ControlsReady", True, block=True)
@@ -56,12 +61,12 @@ def setup_pandad():
       publish_device_state(pm, True)
       sm.update(100)
 
-def send_random_can_messages(sendcan, count):
+def send_random_can_messages(sendcan, count, num_pandas=1):
   sent_msgs = defaultdict(set)
   for _ in range(count):
     to_send = []
     for __ in range(random.randrange(20)):
-      bus = random.choice(range(3))
+      bus = random.choice([b for b in range(3*num_pandas) if b % 4 != 3])
       addr = random.randrange(1, 1<<29)
       dat = bytes(random.getrandbits(8) for _ in range(random.randrange(1, 9)))
       if (addr, dat) in sent_msgs[bus]:
@@ -81,7 +86,8 @@ class TestBoarddLoopback(OpenpilotTestCase):
 
   @with_processes(['pandad'])
   def test_loopback(self):
-    setup_pandad()
+    num_pandas = 2 if TICI and "SINGLE_PANDA" not in os.environ else 1
+    setup_pandad(num_pandas)
 
     sendcan = messaging.pub_sock('sendcan')
     can = messaging.sub_sock('can', conflate=False, timeout=100)
@@ -92,7 +98,7 @@ class TestBoarddLoopback(OpenpilotTestCase):
     for i in range(n):
       print(f"pandad loopback {i}/{n}")
 
-      sent_msgs = send_random_can_messages(sendcan, random.randrange(20, 100))
+      sent_msgs = send_random_can_messages(sendcan, random.randrange(20, 100), num_pandas)
 
       sent_loopback = copy.deepcopy(sent_msgs)
       sent_loopback.update({k+128: copy.deepcopy(v) for k, v in sent_msgs.items()})
