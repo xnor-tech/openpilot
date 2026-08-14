@@ -92,6 +92,7 @@ allowed_system_libs = {
   "EGL", "GLESv2", "GL",
   "Qt5Charts", "Qt5Core", "Qt5Gui", "Qt5Widgets",
   "dl", "drm", "gbm", "m", "pthread",
+  "usb-1.0",
 }
 
 def _resolve_lib(env, name):
@@ -191,7 +192,9 @@ if arch == "comma_arm64":
 elif arch == "Darwin":
   env.Append(LIBPATH=[
     "/System/Library/Frameworks/OpenGL.framework/Libraries",
+    "/opt/homebrew/opt/libusb/lib",
   ])
+  env.Append(CPPPATH=["/opt/homebrew/opt/libusb/include"])
   env.Append(CCFLAGS=["-DGL_SILENCE_DEPRECATION"])
   env.Append(CXXFLAGS=["-DGL_SILENCE_DEPRECATION"])
 

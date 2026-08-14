@@ -17,7 +17,7 @@ from openpilot.common.utils import retry
 from openpilot.common.params import Params
 from openpilot.common.timeout import Timeout
 from openpilot.selfdrive.pandad import can_list_to_can_capnp
-from openpilot.system.hardware import TICI
+from openpilot.common.hardware import COMMA_HARDWARE
 from openpilot.selfdrive.test.helpers import with_processes
 
 
@@ -86,7 +86,7 @@ class TestBoarddLoopback(OpenpilotTestCase):
 
   @with_processes(['pandad'])
   def test_loopback(self):
-    num_pandas = 2 if TICI and "SINGLE_PANDA" not in os.environ else 1
+    num_pandas = 2 if COMMA_HARDWARE and "SINGLE_PANDA" not in os.environ else 1
     setup_pandad(num_pandas)
 
     sendcan = messaging.pub_sock('sendcan')
