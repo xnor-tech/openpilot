@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import binascii
+import json
 import time
 from collections import defaultdict
 
@@ -37,12 +38,33 @@ def update(msgs, bus, dat, low_to_high, high_to_low, quiet=False):
           print(f"{time.monotonic():.2f}\t{hex(y.address)} ({y.address})\t{change}{binascii.hexlify(y.dat)}")
 
 
-def can_printer(bus=0, init_msgs=None, new_msgs=None, table=False):
+def load_noise(fn, low_to_high, high_to_low):
+  with open(fn) as f:
+    noise = json.load(f)
+  for addr, val in noise["low_to_high"].items():
+    low_to_high[int(addr)] |= int(val, 16)
+  for addr, val in noise["high_to_low"].items():
+    high_to_low[int(addr)] |= int(val, 16)
+
+
+def save_noise(fn, low_to_high, high_to_low):
+  noise = {
+    "low_to_high": {str(addr): hex(val) for addr, val in low_to_high.items()},
+    "high_to_low": {str(addr): hex(val) for addr, val in high_to_low.items()},
+  }
+  with open(fn, 'w') as f:
+    json.dump(noise, f)
+
+
+def can_printer(bus=0, init_msgs=None, new_msgs=None, table=False, record_file=None, skip_file=None):
   logcan = messaging.sub_sock('can', timeout=10)
 
   dat = defaultdict(int)
   low_to_high = defaultdict(int)
   high_to_low = defaultdict(int)
+
+  if skip_file is not None:
+    load_noise(skip_file, low_to_high, high_to_low)
 
   if init_msgs is not None:
     update(init_msgs, bus, dat, low_to_high, high_to_low, quiet=True)
@@ -62,6 +84,10 @@ def can_printer(bus=0, init_msgs=None, new_msgs=None, table=False):
         time.sleep(0.02)
     except KeyboardInterrupt:
       pass
+
+  if record_file is not None:
+    save_noise(record_file, low_to_high, high_to_low)
+    print(f"\nSaved observed transitions to {record_file}")
 
   print("\n\n")
   tables = ""
@@ -90,6 +116,8 @@ if __name__ == "__main__":
                                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--bus", type=int, help="CAN bus to print out", default=0)
   parser.add_argument("--table", action="store_true", help="Print a cabana-like table")
+  parser.add_argument("--record", type=str, metavar="FILE", help="Save all observed transitions (noise) to FILE on exit")
+  parser.add_argument("--skip", type=str, metavar="FILE", help="Skip transitions previously recorded to FILE with --record")
   parser.add_argument("init", type=str, nargs='?', help="Route or segment to initialize with. Use empty quotes to compare against all zeros.")
   parser.add_argument("comp", type=str, nargs='?', help="Route or segment to compare against init")
 
@@ -106,4 +134,4 @@ if __name__ == "__main__":
   if args.comp:
     new_lr = LogReader(args.comp)
 
-  can_printer(args.bus, init_msgs=init_lr, new_msgs=new_lr, table=args.table)
+  can_printer(args.bus, init_msgs=init_lr, new_msgs=new_lr, table=args.table, record_file=args.record, skip_file=args.skip)
