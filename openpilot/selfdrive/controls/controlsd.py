@@ -20,6 +20,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurv
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
+from openpilot.sunnypilot.modeld_v2.modeld_base import get_lat_smooth_seconds
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
 from openpilot.sunnypilot.selfdrive.controls.controlsd_ext import ControlsExt
@@ -69,6 +70,11 @@ class Controls(ControlsExt):
       self.LaC = LatControlTorque(self.CP, self.CP_SP, self.CI, DT_CTRL)
 
     self.LaC = ControlsExt.initialize_lateral_control(self, self.LaC, self.CI, DT_CTRL)
+
+    # Rivian steers on the angle channel with a cooperative torque fallback; run the stock
+    # angle controller alongside so angle mode gets upstream saturation warnings
+    self.LaC_angle = LatControlAngle(self.CP, self.CP_SP, self.CI, DT_CTRL) if self.CP.brand == 'rivian' else None
+    self.angle_steering = False
 
   def update(self):
     self.sm.update(15)
@@ -144,13 +150,26 @@ class Controls(ControlsExt):
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-    lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    lat_delay = self.sm["lateralDelay"].lateralDelay + get_lat_smooth_seconds(CS.vEgo, LAT_SMOOTH_SECONDS)
 
     actuators.curvature = self.desired_curvature
+    if self.LaC_angle is not None:
+      # steering on the angle channel, the torque output is idle
+      self.angle_steering = CC.latActive and self.sm['carOutput'].actuatorsOutput.torqueOutputCan == 0
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
-                                                     self.steer_limited_by_safety, self.desired_curvature,
+                                                     self.steer_limited_by_safety or self.angle_steering, self.desired_curvature,
                                                      self.calibrated_pose, curvature_limited, lat_delay)
     actuators.torque = float(steer)
+    if self.LaC_angle is not None:
+      # always publish the angle: the carcontroller steers on it in angle mode
+      # and gates the torque-to-angle handoff on it in torque mode
+      _, lateral_output, angle_log = self.LaC_angle.update(CC.latActive, CS, self.VM, lp,
+                                                           self.steer_limited_by_safety, self.desired_curvature,
+                                                           self.calibrated_pose, curvature_limited, lat_delay)
+      if self.angle_steering:
+        lac_log = angle_log
+      else:
+        self.LaC_angle.reset()
     if self.CP.steerControlType == car.CarParams.SteerControlType.curvature:
       actuators.curvature = float(lateral_output)
     else:
@@ -197,7 +216,7 @@ class Controls(ControlsExt):
 
     if self.get_lat_active(self.sm):
       CO = self.sm['carOutput']
-      if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
+      if self.CP.steerControlType == car.CarParams.SteerControlType.angle or self.angle_steering:
         self.steer_limited_by_safety = abs(CC.actuators.steeringAngleDeg - CO.actuatorsOutput.steeringAngleDeg) > \
                                               STEER_ANGLE_SATURATION_THRESHOLD
       else:
@@ -226,7 +245,7 @@ class Controls(ControlsExt):
     CC.driverMonitoringEscalation = cs.forceDecel
 
     lat_tuning = self.CP.lateralTuning.which()
-    if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
+    if self.CP.steerControlType == car.CarParams.SteerControlType.angle or self.angle_steering:
       cs.lateralControlState.angleState = lac_log
     elif self.CP.steerControlType == car.CarParams.SteerControlType.curvature:
       cs.lateralControlState.curvatureState = lac_log
