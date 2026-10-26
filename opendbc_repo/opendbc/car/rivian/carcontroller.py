@@ -45,10 +45,11 @@ class CarController(CarControllerBase, MadsCarController):
     feature_status = (1 if self.erc.torque_active else 2) if self.mads.lat_active else 0
     can_sends.append(create_acm_status(self.packer, self.frame, feature_status))
 
-    # stock ACM blocks a fresh engage below 20 mph without a lead
-    if self.CP.openpilotLongitudinalControl and not CC.enabled and 5 * CV.MPH_TO_MS <= CS.out.vEgo < 20 * CV.MPH_TO_MS:
-      can_sends.append(create_camera_lead_status_a(self.radar_packer, self.frame, CS.camera_lead_status_a))
-      can_sends.append(create_camera_lead_status_b(self.radar_packer, self.frame, CS.camera_lead_status_b))
+    # lead status replay: enables ACC engagement below 20 mph
+    if self.CP.openpilotLongitudinalControl and not CC.enabled:
+      if CS.out.vEgo < 20 * CV.MPH_TO_MS:
+        can_sends.append(create_camera_lead_status_a(self.radar_packer, self.frame, CS.camera_lead_status_a))
+        can_sends.append(create_camera_lead_status_b(self.radar_packer, self.frame, CS.camera_lead_status_b))
 
     if self.frame % 5 == 0 and not (self.CP.flags & RivianFlags.GEN2):
       can_sends.append(create_wheel_touch(self.packer, CS.sccm_wheel_touch, self.mads.lat_active))

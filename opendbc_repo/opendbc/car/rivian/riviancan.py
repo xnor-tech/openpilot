@@ -83,13 +83,17 @@ def create_longitudinal(packer, counter, accel, enabled):
   return packer.make_can_msg("ACM_longitudinalRequest", 0, values)
 
 
-FCM_LEAD_ID_FALLBACK = 1  # camera reports id 0 while disengaged; ACM may need it set alongside CIPV
+FCM_FAKE_LEAD_ID = 43
 
 
 def create_camera_lead_status_a(packer, frame, camera_lead_status_a):
+  # camera lead frame with defaults applied
   values = dict(camera_lead_status_a)
   values["COUNTER"] = frame % 4
-  values["ID_LEAD"] = values["ID_LEAD"] or FCM_LEAD_ID_FALLBACK
+  values["LEAD_LOST_STATE"] = 0
+  values["ID_LEAD"] = values["ID_LEAD"] or FCM_FAKE_LEAD_ID
+  values["VIDEO_OBJECT_COUNT"] = values["VIDEO_OBJECT_COUNT"] or 1
+  values["VIDEO_VEHICLE_COUNT"] = values["VIDEO_VEHICLE_COUNT"] or 1
   return packer.make_can_msg("CAMERA_LEAD_STATUS_A", 1, values)
 
 
