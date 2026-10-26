@@ -83,6 +83,23 @@ def create_longitudinal(packer, counter, accel, enabled):
   return packer.make_can_msg("ACM_longitudinalRequest", 0, values)
 
 
+FCM_LEAD_ID_FALLBACK = 1  # camera reports id 0 while disengaged; ACM may need it set alongside CIPV
+
+
+def create_camera_lead_status_a(packer, frame, camera_lead_status_a):
+  values = dict(camera_lead_status_a)
+  values["COUNTER"] = frame % 4
+  values["ID_LEAD"] = values["ID_LEAD"] or FCM_LEAD_ID_FALLBACK
+  return packer.make_can_msg("CAMERA_LEAD_STATUS_A", 1, values)
+
+
+def create_camera_lead_status_b(packer, frame, camera_lead_status_b):
+  values = dict(camera_lead_status_b)
+  values["LEAD_PRESENT"] = 1
+  values["COUNTER"] = frame % 4
+  return packer.make_can_msg("CAMERA_LEAD_STATUS_B", 1, values)
+
+
 def create_adas_status(packer, vdm_adas_status, interface_status, driver_override=None, block_engage=False):
   values = {s: vdm_adas_status[s] for s in (
     "VDM_AdasStatus_Counter",

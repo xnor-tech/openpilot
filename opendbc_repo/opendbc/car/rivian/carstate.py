@@ -16,6 +16,8 @@ class CarState(CarStateBase, CarStateExt):
     self.last_speed = V_CRUISE_MAX
 
     self.acm_lka_hba_cmd: dict | None = None
+    self.camera_lead_status_a: dict = {}
+    self.camera_lead_status_b: dict = {}
     self.sccm_wheel_touch: dict | None = None
     self.vdm_adas_status: list[dict] | None = None
     self.hands_on_level = 0
@@ -103,6 +105,10 @@ class CarState(CarStateBase, CarStateExt):
 
     # Messages needed by carcontroller
     self.acm_lka_hba_cmd = copy.copy(cp_cam.vl["ACM_lkaHbaCmd"])
+    # camera lead frames, replayed in carcontroller to engage below 20 mph
+    cp_radar = can_parsers[Bus.radar]
+    self.camera_lead_status_a = copy.copy(cp_radar.vl["CAMERA_LEAD_STATUS_A"])
+    self.camera_lead_status_b = copy.copy(cp_radar.vl["CAMERA_LEAD_STATUS_B"])
     if not (self.CP.flags & RivianFlags.GEN2):
       self.sccm_wheel_touch = copy.copy(cp.vl["SCCM_WheelTouch"])
     # This message can lag and send two messages at once, make sure we forward all of them
@@ -127,6 +133,7 @@ class CarState(CarStateBase, CarStateExt):
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 0),
       Bus.adas: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 1),
+      Bus.radar: CANParser(DBC[CP.carFingerprint][Bus.radar], [("CAMERA_LEAD_STATUS_A", 0), ("CAMERA_LEAD_STATUS_B", 0)], 1),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2),
       # 192 = safety-rejected TX echo of bus 0
       Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], [("ACM_longitudinalRequest", float('nan'))], 192),

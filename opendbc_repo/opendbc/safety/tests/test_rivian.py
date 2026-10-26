@@ -235,7 +235,7 @@ class TestRivianLongitudinalSafety(TestRivianSafetyBase):
 
   SAFETY_PARAM = RivianSafetyFlags.LONG_CONTROL
 
-  TX_MSGS = [[0x100, 0], [0x110, 0], [0x120, 0], [0x321, 2], [0x160, 0], [0x162, 2]]
+  TX_MSGS = [[0x100, 0], [0x110, 0], [0x120, 0], [0x321, 2], [0x160, 0], [0x162, 2], [0x214, 1], [0x215, 1]]
   RELAY_MALFUNCTION_ADDRS = {0: (0x100, 0x110, 0x120, 0x160), 2: (0x321, 0x162)}
   FWD_BLACKLISTED_ADDRS = {0: [0x321, 0x162], 2: [0x100, 0x110, 0x120, 0x160]}
 class TestRivianIgnition(common.SafetyTestBase):

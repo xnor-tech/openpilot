@@ -1,10 +1,11 @@
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus
+from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.rivian.ext_controller import ExternalController, get_safety_CP  # noqa: F401
 from opendbc.car.rivian.riviancan import create_angle_steering, create_lka_steering, create_longitudinal, create_wheel_touch, create_adas_status, \
-                                         create_acm_status
+                                         create_acm_status, create_camera_lead_status_a, create_camera_lead_status_b
 from opendbc.car.rivian.values import CarControllerParams, RivianFlags
 
 from opendbc.sunnypilot.car.rivian.mads import MadsCarController
@@ -16,6 +17,7 @@ class CarController(CarControllerBase, MadsCarController):
     MadsCarController.__init__(self)
     self.apply_torque_last = 0
     self.packer = CANPacker(dbc_names[Bus.pt])
+    self.radar_packer = CANPacker(dbc_names[Bus.radar])
 
     self.cancel_frames = 0
     self.long_cmd_counter = 0
@@ -42,6 +44,11 @@ class CarController(CarControllerBase, MadsCarController):
     can_sends.append(create_angle_steering(self.packer, self.frame, self.erc.apply_angle_last, self.erc.angle_active))
     feature_status = (1 if self.erc.torque_active else 2) if self.mads.lat_active else 0
     can_sends.append(create_acm_status(self.packer, self.frame, feature_status))
+
+    # stock ACM blocks a fresh engage below 20 mph without a lead
+    if self.CP.openpilotLongitudinalControl and not CC.enabled and 5 * CV.MPH_TO_MS <= CS.out.vEgo < 20 * CV.MPH_TO_MS:
+      can_sends.append(create_camera_lead_status_a(self.radar_packer, self.frame, CS.camera_lead_status_a))
+      can_sends.append(create_camera_lead_status_b(self.radar_packer, self.frame, CS.camera_lead_status_b))
 
     if self.frame % 5 == 0 and not (self.CP.flags & RivianFlags.GEN2):
       can_sends.append(create_wheel_touch(self.packer, CS.sccm_wheel_touch, self.mads.lat_active))

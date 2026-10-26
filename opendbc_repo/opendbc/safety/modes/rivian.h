@@ -183,6 +183,7 @@ static safety_config rivian_init(uint16_t param) {
     {0x162, 2, 8, .check_relay = true},
   };
   // 0x160 = ACM_longitudinalRequest, 0x162 = VDM_AdasSts
+  // 0x214/0x215 = FCM camera lead status, replayed to allow ACC engage below 20 mph (real FCM keeps sending, so no relay check)
   static const CanMsg RIVIAN_LONG_TX_MSGS[] = {
     {0x100, 0, 8, .check_relay = true},
     {0x110, 0, 8, .check_relay = true},
@@ -190,6 +191,8 @@ static safety_config rivian_init(uint16_t param) {
     {0x321, 2, 7, .check_relay = true},
     {0x160, 0, 5, .check_relay = true},
     {0x162, 2, 8, .check_relay = true},
+    {0x214, 1, 8, .check_relay = false},
+    {0x215, 1, 8, .check_relay = false},
   };
 
   static RxCheck rivian_rx_checks[] = {
