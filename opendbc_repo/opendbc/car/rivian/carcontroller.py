@@ -45,6 +45,17 @@ class CarController(CarControllerBase, MadsCarController):
     if self.frame % 5 == 0 and not (self.CP.flags & RivianFlags.GEN2):
       can_sends.append(create_wheel_touch(self.packer, CS.sccm_wheel_touch, self.mads.lat_active))
 
+    # Stock ACC cancel: openpilot declined (noEntry) or dropped (soft/immediate disable) an engagement while
+    # the ACM is in ACC. Spoof a driver cancel press to the ACM so it exits ACC cleanly, instead of sitting in
+    # ACC with no enabled long controller behind it and timing out into an ACC fault.
+    # The ACM needs to see "available" before it will accept "unavailable"; the VDM takes a few frames to ack.
+    interface_status = None
+    if CC.cruiseControl.cancel:
+      interface_status = 1 if self.cancel_frames < 5 else 0
+      self.cancel_frames += 1
+    else:
+      self.cancel_frames = 0
+
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       # CC.enabled lags the ACM clearing its feature status by the selfdrived/controlsd round trip
@@ -63,17 +74,8 @@ class CarController(CarControllerBase, MadsCarController):
 
       # keep the stock ACM from winding up its unactuated request
       for msg in CS.vdm_adas_status:
-        can_sends.append(create_adas_status(self.packer, msg, None, 0 if CC.enabled else None, block_engage))
+        can_sends.append(create_adas_status(self.packer, msg, interface_status, 0 if CC.enabled else None, block_engage))
     else:
-      interface_status = None
-      if CC.cruiseControl.cancel:
-        # if there is a noEntry, we need to send a status of "available" before the ACM will accept "unavailable"
-        # send "available" right away as the VDM itself takes a few frames to acknowledge
-        interface_status = 1 if self.cancel_frames < 5 else 0
-        self.cancel_frames += 1
-      else:
-        self.cancel_frames = 0
-
       for msg in CS.vdm_adas_status:
         can_sends.append(create_adas_status(self.packer, msg, interface_status))
 
