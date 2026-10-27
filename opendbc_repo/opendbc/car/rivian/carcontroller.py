@@ -18,6 +18,8 @@ class CarController(CarControllerBase, MadsCarController):
 
     self.cancel_frames = 0
     self.long_cmd_counter = 0
+    # set by card: False while selfdrived has a NO_ENTRY event (openpilot would refuse to engage)
+    self.openpilot_engageable = True
     self.erc = ExternalController()
 
   def update(self, CC, CC_SP, CS, now_nanos):
@@ -54,9 +56,14 @@ class CarController(CarControllerBase, MadsCarController):
         self.long_cmd_counter += 1
       can_sends.append(create_longitudinal(self.packer, self.long_cmd_counter, accel, long_enabled))
 
+      # If openpilot would refuse to engage (NO_ENTRY), hide the driver's ACC engage request from the ACM so it never
+      # enters ACC. Once the ACM is in ACC with nothing accepting its long request, it latches a fault that only
+      # clears when the car sleeps; a spoofed cancel is not enough to prevent it. Cancel requests still pass through.
+      block_engage = not self.openpilot_engageable and not CS.out.cruiseState.enabled
+
       # keep the stock ACM from winding up its unactuated request
       for msg in CS.vdm_adas_status:
-        can_sends.append(create_adas_status(self.packer, msg, None, 0 if CC.enabled else None))
+        can_sends.append(create_adas_status(self.packer, msg, None, 0 if CC.enabled else None, block_engage))
     else:
       interface_status = None
       if CC.cruiseControl.cancel:
