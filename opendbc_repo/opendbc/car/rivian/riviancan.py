@@ -83,7 +83,7 @@ def create_longitudinal(packer, counter, accel, enabled):
   return packer.make_can_msg("ACM_longitudinalRequest", 0, values)
 
 
-def create_adas_status(packer, vdm_adas_status, interface_status, driver_override=None):
+def create_adas_status(packer, vdm_adas_status, interface_status, driver_override=None, block_engage=False):
   values = {s: vdm_adas_status[s] for s in (
     "VDM_AdasStatus_Counter",
     "VDM_AdasDecelLimit",
@@ -96,6 +96,10 @@ def create_adas_status(packer, vdm_adas_status, interface_status, driver_overrid
     "VDM_AdasVehicleHoldStatus",
     "VDM_UserAdasRequest",
   )}
+
+  # VDM_UserAdasRequest: 0=IDLE, 1=UP_1 (cancel), 2=UP_2, 3=DOWN_1, 4=DOWN_2. Only let idle/cancel through.
+  if block_engage and values["VDM_UserAdasRequest"] not in (0, 1):
+    values["VDM_UserAdasRequest"] = 0
 
   if interface_status is not None:
     if interface_status == 1:
