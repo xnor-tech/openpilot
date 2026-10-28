@@ -3,7 +3,8 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.rivian.ext_controller import ExternalController, get_safety_CP  # noqa: F401
-from opendbc.car.rivian.riviancan import create_angle_steering, create_lka_steering, create_longitudinal, create_wheel_touch, create_adas_status, create_acm_status
+from opendbc.car.rivian.riviancan import create_angle_steering, create_lka_steering, create_longitudinal, create_wheel_touch, create_adas_status, \
+                                         create_acm_status
 from opendbc.car.rivian.values import CarControllerParams, RivianFlags
 
 from opendbc.sunnypilot.car.rivian.mads import MadsCarController
