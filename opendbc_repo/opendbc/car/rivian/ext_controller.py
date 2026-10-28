@@ -11,11 +11,11 @@ from opendbc.car.vehicle_model import VehicleModel
 
 # EPAS angle envelope (EPAS_High_Angle_Cmd_Err)
 EPAS_FW_MAX_ANGLE_BP = [0.0, 2.78, 5.56, 8.33, 12.50, 16.67, 22.22, 27.78]  # m/s
-EPAS_FW_MAX_ANGLE_V  = [500, 500,  250,  150,  85,    56,    40,    25   ]  # deg
+EPAS_FW_MAX_ANGLE_V  = [500, 500,  250,  150,  85,    56,    40,    25]  # deg
 
 # EPAS windowed rate limit (EPAS_High_Actual_Angle_Rate_Err)
 EPAS_FW_RATE_BP = [5.56, 8.33, 12.50, 16.67]  # m/s
-EPAS_FW_RATE_V  = [4.50, 1.50, 0.60,  0.18 ]  # deg/frame
+EPAS_FW_RATE_V  = [4.50, 1.50, 0.60,  0.18]  # deg/frame
 
 EPAS_FW_ANGLE_MARGIN = 0.98
 EPAS_FW_RATE_MARGIN  = 0.94
