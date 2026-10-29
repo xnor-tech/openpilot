@@ -10,6 +10,8 @@ from opendbc.car.rivian.values import CarControllerParams, RivianFlags
 
 from opendbc.sunnypilot.car.rivian.mads import MadsCarController
 
+LEAD_STATUS_BURST = 3  # lead status frames per message per update
+
 
 class CarController(CarControllerBase, MadsCarController):
   def __init__(self, dbc_names, CP, CP_SP):
@@ -46,10 +48,18 @@ class CarController(CarControllerBase, MadsCarController):
     can_sends.append(create_acm_status(self.packer, self.frame, feature_status))
 
     # lead status replay: enables ACC engagement below 20 mph
+    # the stock camera keeps streaming no-lead frames on these ids, so send a
+    # burst each cycle with its counter continued; ours then dominate the
+    # freshest frames the ACM sees
     if self.CP.openpilotLongitudinalControl and not CC.enabled:
       if CS.out.vEgo < 20 * CV.MPH_TO_MS:
-        can_sends.append(create_camera_lead_status_a(self.radar_packer, self.frame, CS.camera_lead_status_a))
-        can_sends.append(create_camera_lead_status_b(self.radar_packer, self.frame, CS.camera_lead_status_b))
+        last_a = CS.camera_lead_status_a.get("COUNTER")
+        last_b = CS.camera_lead_status_b.get("COUNTER")
+        cnt_a = 0 if last_a is None else (last_a + 1) % 4
+        cnt_b = 0 if last_b is None else (last_b + 1) % 4
+        for i in range(LEAD_STATUS_BURST):
+          can_sends.append(create_camera_lead_status_a(self.radar_packer, CS.camera_lead_status_a, (cnt_a + i) % 4))
+          can_sends.append(create_camera_lead_status_b(self.radar_packer, CS.camera_lead_status_b, (cnt_b + i) % 4))
 
     if self.frame % 5 == 0 and not (self.CP.flags & RivianFlags.GEN2):
       can_sends.append(create_wheel_touch(self.packer, CS.sccm_wheel_touch, self.mads.lat_active))

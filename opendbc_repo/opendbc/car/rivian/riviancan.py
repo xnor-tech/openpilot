@@ -86,10 +86,10 @@ def create_longitudinal(packer, counter, accel, enabled):
 FCM_FAKE_LEAD_ID = 43
 
 
-def create_camera_lead_status_a(packer, frame, camera_lead_status_a):
-  # camera lead frame with defaults applied
+def create_camera_lead_status_a(packer, camera_lead_status_a, counter):
+  # lead frame with defaults applied; counter continues the camera's stream
   values = dict(camera_lead_status_a)
-  values["COUNTER"] = frame % 4
+  values["COUNTER"] = counter
   values["LEAD_LOST_STATE"] = 0
   values["ID_LEAD"] = values["ID_LEAD"] or FCM_FAKE_LEAD_ID
   values["VIDEO_OBJECT_COUNT"] = values["VIDEO_OBJECT_COUNT"] or 1
@@ -97,10 +97,10 @@ def create_camera_lead_status_a(packer, frame, camera_lead_status_a):
   return packer.make_can_msg("CAMERA_LEAD_STATUS_A", 1, values)
 
 
-def create_camera_lead_status_b(packer, frame, camera_lead_status_b):
+def create_camera_lead_status_b(packer, camera_lead_status_b, counter):
   values = dict(camera_lead_status_b)
   values["LEAD_PRESENT"] = 1
-  values["COUNTER"] = frame % 4
+  values["COUNTER"] = counter
   return packer.make_can_msg("CAMERA_LEAD_STATUS_B", 1, values)
 
 
