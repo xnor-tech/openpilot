@@ -269,6 +269,45 @@
           ]
         },
         {
+          "id": "wheelbase",
+          "title": "Wheelbase Compensation",
+          "description": "Reduce rear-wheel cut-in through turns",
+          "items": [
+            {
+              "key": "OfftrackCompensationEnabled",
+              "widget": "toggle",
+              "title": "Wheelbase Compensation",
+              "description": "Widens turns using your car's wheelbase to reduce rear-wheel cut-in. Uses a geometric estimate and does not detect curbs.",
+              "enablement": [
+                {
+                  "type": "offroad_only"
+                }
+              ],
+              "sub_items": [
+                {
+                  "key": "OfftrackCompensationGain",
+                  "widget": "option",
+                  "title": "Wheelbase Compensation Gain",
+                  "description": "0 = off, 1 = full geometric compensation. Default: 0.5.",
+                  "min": 0.0,
+                  "max": 1.0,
+                  "step": 0.05,
+                  "enablement": [
+                    {
+                      "type": "offroad_only"
+                    },
+                    {
+                      "type": "param",
+                      "key": "OfftrackCompensationEnabled",
+                      "equals": true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
           "id": "torque",
           "title": "Torque Control",
           "description": "Steering torque tuning and lateral control method",

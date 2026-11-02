@@ -3,7 +3,7 @@ from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.rivian.carcontroller import CarController
 from opendbc.car.rivian.carstate import CarState
 from opendbc.car.rivian.radar_interface import RadarInterface
-from opendbc.car.rivian.values import RivianFlags, RivianSafetyFlags
+from opendbc.car.rivian.values import RivianFlags, RivianSafetyFlags, set_model_line_specs
 from opendbc.sunnypilot.car.rivian.values import RivianFlagsSP
 
 
@@ -51,6 +51,9 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def _get_params_sp(stock_cp: structs.CarParams, ret: structs.CarParamsSP, candidate, fingerprint: dict[int, dict[int, int]],
                      car_fw: list[structs.CarParams.CarFw], alpha_long: bool, is_release_sp: bool, docs: bool) -> structs.CarParamsSP:
+    # get_car assigns the VIN before this stage, and constructs the controller afterwards.
+    set_model_line_specs(stock_cp)
+
     if 0x131a in fingerprint[1]:
       ret.flags |= RivianFlagsSP.LONGITUDINAL_HARNESS_UPGRADE.value
       stock_cp.radarUnavailable = False

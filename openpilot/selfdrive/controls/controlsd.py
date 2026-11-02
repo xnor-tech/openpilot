@@ -24,6 +24,7 @@ from openpilot.sunnypilot.modeld_v2.modeld_base import get_lat_smooth_seconds
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
 from openpilot.sunnypilot.selfdrive.controls.controlsd_ext import ControlsExt
+from openpilot.sunnypilot.selfdrive.controls.lib.offtrack import offtrack_curvature
 
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
@@ -70,6 +71,7 @@ class Controls(ControlsExt):
       self.LaC = LatControlTorque(self.CP, self.CP_SP, self.CI, DT_CTRL)
 
     self.LaC = ControlsExt.initialize_lateral_control(self, self.LaC, self.CI, DT_CTRL)
+    self.update_params_1hz()
 
     # Rivian steers on the angle channel with a cooperative torque fallback; run the stock
     # angle controller alongside so angle mode gets upstream saturation warnings
@@ -83,6 +85,10 @@ class Controls(ControlsExt):
     if self.sm.updated["deviceMotion"]:
       device_motion = Pose.from_device_motion(self.sm['deviceMotion'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_motion)
+
+  def update_params_1hz(self):
+    self.offtrack_gain = self.params.get("OfftrackCompensationGain", return_default=True) \
+                         if self.params.get_bool("OfftrackCompensationEnabled") else 0.
 
   def state_control(self):
     CS = self.sm['carState']
@@ -145,10 +151,14 @@ class Controls(ControlsExt):
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
+    if self.sm.frame % int(1. / DT_CTRL) == 0:
+      self.update_params_1hz()
     if self.sm.valid['lateralManeuverPlan']:
       new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
+    if CC.latActive:
+      new_desired_curvature = offtrack_curvature(new_desired_curvature, self.CP.wheelbase, self.offtrack_gain)
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["lateralDelay"].lateralDelay + get_lat_smooth_seconds(CS.vEgo, LAT_SMOOTH_SECONDS)
 

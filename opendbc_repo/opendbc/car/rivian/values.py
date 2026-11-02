@@ -48,6 +48,10 @@ class RivianSafetyFlags(IntFlag):
   LONG_CONTROL = 1
 
 
+R1S_WHEELBASE = 3.08
+R1T_WHEELBASE = 3.45
+
+
 class CAR(Platforms):
   RIVIAN_R1 = RivianPlatformConfig(
     [
@@ -58,11 +62,19 @@ class CAR(Platforms):
                     car_parts=CarParts.common([CarHarness.rivian_a])),
       RivianCarDocs("Rivian R1T 2025", car_parts=CarParts.common([CarHarness.rivian_b])),
     ],
-    CarSpecs(wheelbase=3.08, steerRatio=15.2),
+    CarSpecs(wheelbase=R1T_WHEELBASE, steerRatio=15.2),  # R1S geometry is selected from the VIN
     wmis={WMI.RIVIAN_TRUCK, WMI.RIVIAN_MPV},
     lines={ModelLine.R1T, ModelLine.R1S},
     years={ModelYear.N_2022, ModelYear.P_2023, ModelYear.R_2024, ModelYear.S_2025},
   )
+
+
+def set_model_line_specs(CP: structs.CarParams) -> None:
+  # Apply the R1S geometry to the shared CarParams so steering and parameter learning agree.
+  # R1T and unknown VINs retain the platform's R1T wheelbase, as in rx-wb.
+  if CP.carVin[3:4] == ModelLine.R1S and CP.wheelbase > R1S_WHEELBASE:
+    CP.centerToFront *= R1S_WHEELBASE / CP.wheelbase
+    CP.wheelbase = R1S_WHEELBASE
 
 
 def match_fw_to_car_fuzzy(live_fw_versions, vin, offline_fw_versions) -> set[str]:
