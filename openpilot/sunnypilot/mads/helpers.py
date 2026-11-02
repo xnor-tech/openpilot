@@ -8,6 +8,7 @@ See the LICENSE.md file in the root directory for more details.
 from openpilot.common.params import Params
 from opendbc.car import structs
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
+from opendbc.car.rivian.values import set_model_line_specs
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyFlagsSP
 from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlagsSP
 
@@ -54,6 +55,9 @@ def set_alternative_experience(CP: structs.CarParams, CP_SP: structs.CarParamsSP
 
 
 def set_car_specific_params(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params):
+  if CP.brand == "rivian":
+    set_model_line_specs(CP)
+
   if CP.brand == "hyundai":
     # TODO-SP: This should be separated from MADS module for future implementations
     #          Use "HyundaiLongitudinalMainCruiseToggleable" param

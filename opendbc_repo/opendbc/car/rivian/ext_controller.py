@@ -6,7 +6,7 @@ from opendbc.car.lateral import (
   apply_driver_steer_torque_limits, common_fault_avoidance,
   apply_steer_angle_limits_vm, get_max_angle_delta_vm, get_max_angle_vm,
 )
-from opendbc.car.rivian.values import CarControllerParams as CCP
+from opendbc.car.rivian.values import CarControllerParams as CCP, R1S_WHEELBASE
 from opendbc.car.vehicle_model import VehicleModel
 
 # EPAS angle envelope (EPAS_High_Angle_Cmd_Err)
@@ -60,7 +60,11 @@ class _RateBudget:
 
 def get_safety_CP():
   from opendbc.car.rivian.interface import CarInterface
-  return CarInterface.get_non_essential_params("RIVIAN_R1")
+  CP = CarInterface.get_non_essential_params("RIVIAN_R1")
+  # Match rivian.h's fixed 3.08 m safety model independently of the detected model line.
+  CP.centerToFront *= R1S_WHEELBASE / CP.wheelbase
+  CP.wheelbase = R1S_WHEELBASE
+  return CP
 
 
 class ExternalController:
