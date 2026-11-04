@@ -180,6 +180,9 @@ class Controls(ControlsExt):
         lac_log = angle_log
       else:
         self.LaC_angle.reset()
+        # always log angleState, Connect breaks on segments where the type flips
+        angle_log.saturated = lac_log.saturated
+        lac_log = angle_log
     if self.CP.steerControlType == car.CarParams.SteerControlType.curvature:
       actuators.curvature = float(lateral_output)
     else:
@@ -255,7 +258,7 @@ class Controls(ControlsExt):
     CC.driverMonitoringEscalation = cs.forceDecel
 
     lat_tuning = self.CP.lateralTuning.which()
-    if self.CP.steerControlType == car.CarParams.SteerControlType.angle or self.angle_steering:
+    if self.CP.steerControlType == car.CarParams.SteerControlType.angle or self.LaC_angle is not None:
       cs.lateralControlState.angleState = lac_log
     elif self.CP.steerControlType == car.CarParams.SteerControlType.curvature:
       cs.lateralControlState.curvatureState = lac_log
