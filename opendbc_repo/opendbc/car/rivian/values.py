@@ -1,10 +1,11 @@
 from dataclasses import dataclass, field
 from enum import StrEnum, IntFlag
 
-from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, structs, uds
+from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, structs, uds, ACCELERATION_DUE_TO_GRAVITY
 from opendbc.car.docs_definitions import CarHarness, CarDocs, CarParts
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries, p16
 from opendbc.car.vin import Vin
+from opendbc.car.lateral import AngleSteeringLimitsVM, ISO_LATERAL_ACCEL
 
 
 class WMI(StrEnum):
@@ -47,6 +48,10 @@ class RivianSafetyFlags(IntFlag):
   LONG_CONTROL = 1
 
 
+R1S_WHEELBASE = 3.08
+R1T_WHEELBASE = 3.45
+
+
 class CAR(Platforms):
   RIVIAN_R1 = RivianPlatformConfig(
     [
@@ -57,11 +62,19 @@ class CAR(Platforms):
                     car_parts=CarParts.common([CarHarness.rivian_a])),
       RivianCarDocs("Rivian R1T 2025", car_parts=CarParts.common([CarHarness.rivian_b])),
     ],
-    CarSpecs(wheelbase=3.08, steerRatio=15.2),
+    CarSpecs(wheelbase=R1T_WHEELBASE, steerRatio=15.2),  # R1S geometry is selected from the VIN
     wmis={WMI.RIVIAN_TRUCK, WMI.RIVIAN_MPV},
     lines={ModelLine.R1T, ModelLine.R1S},
     years={ModelYear.N_2022, ModelYear.P_2023, ModelYear.R_2024, ModelYear.S_2025},
   )
+
+
+def set_model_line_specs(CP: structs.CarParams) -> None:
+  # Apply the R1S geometry to the shared CarParams so steering and parameter learning agree.
+  # R1T and unknown VINs retain the platform's R1T wheelbase, as in rx-wb.
+  if CP.carVin[3:4] == ModelLine.R1S and CP.wheelbase > R1S_WHEELBASE:
+    CP.centerToFront *= R1S_WHEELBASE / CP.wheelbase
+    CP.wheelbase = R1S_WHEELBASE
 
 
 def match_fw_to_car_fuzzy(live_fw_versions, vin, offline_fw_versions) -> set[str]:
@@ -117,6 +130,8 @@ GEAR_MAP = {
   4: structs.CarState.GearShifter.drive,
 }
 
+AVERAGE_ROAD_ROLL = 0.06  # ~3.4 degrees, 6% superelevation. higher actual roll lowers lateral acceleration
+
 
 class CarControllerParams:
   # The R1T 2023 and R1S 2023 we tested on achieves slightly more lateral acceleration going left vs. right
@@ -135,6 +150,15 @@ class CarControllerParams:
   STEER_DRIVER_ALLOWANCE = 100  # allowed driver torque before start limiting
   STEER_DRIVER_MULTIPLIER = 2  # weight driver torque
   STEER_DRIVER_FACTOR = 100
+
+  # master split AngleSteeringLimits into v1 (rate) + VM (lateral-accel); Rivian
+  # angle control uses the VM limiter (ext_controller.apply_steer_angle_limits_vm).
+  ANGLE_LIMITS: AngleSteeringLimitsVM = AngleSteeringLimitsVM(
+    500,  # deg, STEER_ANGLE_MAX
+    MAX_LATERAL_ACCEL=ISO_LATERAL_ACCEL + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),  # ~3.6 m/s^2
+    MAX_LATERAL_JERK=3.0 + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),  # ~3.6 m/s^3
+    MAX_ANGLE_RATE=2.5,  # deg/10ms frame
+  )
 
   ACCEL_MIN = -3.5  # m/s^2
   ACCEL_MAX = 2.0  # m/s^2

@@ -96,6 +96,22 @@ class SteeringLayout(Widget):
       title=lambda: tr("Neural Network Lateral Control (NNLC)"),
       description=""
     )
+    self._offtrack_toggle = toggle_item_sp(
+      param="OfftrackCompensationEnabled",
+      title=lambda: tr("Wheelbase Compensation"),
+      description=lambda: tr("Widens turns using your car's wheelbase to reduce rear-wheel cut-in. " +
+                             "Uses a geometric estimate and does not detect curbs."),
+    )
+    self._offtrack_gain = option_item_sp(
+      param="OfftrackCompensationGain",
+      title=lambda: tr("Wheelbase Compensation Gain"),
+      description=lambda: tr("0 = off, 1 = full geometric compensation. Default: 0.5."),
+      min_value=0,
+      max_value=100,
+      value_change_step=5,
+      use_float_scaling=True,
+      label_callback=lambda value: f"{value / 100:.2f}",
+    )
 
     items = [
       self._mads_toggle,
@@ -106,6 +122,9 @@ class SteeringLayout(Widget):
       self._blinker_control_toggle,
       self._blinker_control_options,
       self._blinker_reengage_delay,
+      LineSeparatorSP(40),
+      self._offtrack_toggle,
+      self._offtrack_gain,
       LineSeparatorSP(40),
       self._torque_control_toggle,
       self._torque_customization_button,
@@ -131,6 +150,9 @@ class SteeringLayout(Widget):
     self._mads_settings_button.action_item.set_enabled(ui_state.is_offroad() and self._mads_toggle.action_item.get_state())
     self._blinker_control_options.set_visible(self._blinker_control_toggle.action_item.get_state())
     self._blinker_reengage_delay.set_visible(self._blinker_control_toggle.action_item.get_state())
+    self._offtrack_toggle.action_item.set_enabled(ui_state.is_offroad())
+    self._offtrack_gain.set_visible(self._offtrack_toggle.action_item.get_state())
+    self._offtrack_gain.action_item.set_enabled(ui_state.is_offroad() and self._offtrack_toggle.action_item.get_state())
 
     enforce_torque_enabled = self._torque_control_toggle.action_item.get_state()
     nnlc_enabled = self._nnlc_toggle.action_item.get_state()

@@ -13,7 +13,7 @@ def create_lka_steering(packer, frame, acm_lka_hba_cmd, apply_torque, enabled, a
   values |= {
     "ACM_lkaHbaCmd_Counter": frame % 15,  # 0-14 counter (15 states), so % 15 is correct despite the 4-bit field
     "ACM_lkaStrToqReq": apply_torque,
-    "ACM_lkaActToi": mads.lat_active,
+    "ACM_lkaActToi": active,
 
     "ACM_lkaLaneRecogState": 3 if mads.lka_icon_states else 0,
     "ACM_lkaSymbolState": 3 if mads.lka_icon_states else 0,
@@ -29,6 +29,28 @@ def create_lka_steering(packer, frame, acm_lka_hba_cmd, apply_torque, enabled, a
   }
 
   return packer.make_can_msg("ACM_lkaHbaCmd", 0, values)
+
+
+def create_angle_steering(packer, frame, angle, active):
+  values = {
+    "ACM_SteeringControl_Counter": frame % 15,
+    "ACM_SteeringAngleRequest": angle,
+    "ACM_EacEnabled": active,
+    "ACM_HapticRequired": 0
+  }
+
+  return packer.make_can_msg("ACM_SteeringControl", 0, values)
+
+def create_acm_status(packer, frame, feature_status):
+  values = {
+    "ACM_Status_Counter": frame % 15,
+    "ACM_FeatureStatus": feature_status,
+    "ACM_FaultStatus": 0,
+    "ACM_FaultSupervisorState": 0,
+    "ACM_Unkown1": 0,
+  }
+
+  return packer.make_can_msg("ACM_Status", 0, values)
 
 
 def create_wheel_touch(packer, sccm_wheel_touch, enabled):
@@ -49,9 +71,9 @@ def create_wheel_touch(packer, sccm_wheel_touch, enabled):
   return packer.make_can_msg("SCCM_WheelTouch", 2, values)
 
 
-def create_longitudinal(packer, frame, accel, enabled):
+def create_longitudinal(packer, counter, accel, enabled):
   values = {
-    "ACM_longitudinalRequest_Counter": frame % 15,  # 0-14 counter (15 states), so % 15 is correct despite the 4-bit field
+    "ACM_longitudinalRequest_Counter": counter % 15,  # 0-14 counter (15 states), so % 15 is correct despite the 4-bit field
     "ACM_AccelerationRequest": accel,
     "ACM_PrndRequest": 0,
     "ACM_longInterfaceEnable": 1 if enabled else 0,
@@ -61,7 +83,7 @@ def create_longitudinal(packer, frame, accel, enabled):
   return packer.make_can_msg("ACM_longitudinalRequest", 0, values)
 
 
-def create_adas_status(packer, vdm_adas_status, interface_status):
+def create_adas_status(packer, vdm_adas_status, interface_status, driver_override=None, block_engage=False):
   values = {s: vdm_adas_status[s] for s in (
     "VDM_AdasStatus_Counter",
     "VDM_AdasDecelLimit",
@@ -75,8 +97,17 @@ def create_adas_status(packer, vdm_adas_status, interface_status):
     "VDM_UserAdasRequest",
   )}
 
+  # VDM_UserAdasRequest: 0=IDLE, 1=UP_1 (cancel), 2=UP_2, 3=DOWN_1, 4=DOWN_2. Only let idle/cancel through.
+  if block_engage and values["VDM_UserAdasRequest"] not in (0, 1):
+    values["VDM_UserAdasRequest"] = 0
+
   if interface_status is not None:
+    if interface_status == 1:
+      values["VDM_UserAdasRequest"] = 1
     values["VDM_AdasInterfaceStatus"] = interface_status
+
+  if driver_override is not None:
+    values["VDM_AdasDriverModeStatus"] = driver_override
 
   return packer.make_can_msg("VDM_AdasSts", 2, values)
 
